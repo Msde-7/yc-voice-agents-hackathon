@@ -35,6 +35,7 @@ cp .env.example .env
 | `NEMOTRON_LLM_MODEL` | Optional — defaults to `nvidia/nemotron-3-super` |
 | `NEMOTRON_ENABLE_THINKING` | `False` (keep off for voice — thinking tokens get spoken aloud) |
 | `CEKURA_API_KEY` | [dashboard.cekura.ai](https://dashboard.cekura.ai) |
+| `CEKURA_AGENT_ID` | Cekura dashboard → your agent → integer ID |
 
 ## 3. Twilio CLI
 
