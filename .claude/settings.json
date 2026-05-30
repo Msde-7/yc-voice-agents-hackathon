@@ -9,5 +9,6 @@
   },
   "enabledPlugins": {
     "cekura@cekura-skills": true
-  }
+  },
+  "enabledMcpjsonServers": ["cekura"]
 }
