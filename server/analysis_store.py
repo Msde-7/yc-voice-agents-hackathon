@@ -1,8 +1,8 @@
 """In-memory store for multi-scenario analysis sessions."""
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
-import asyncio
 from typing import Literal
 
 from pydantic import BaseModel

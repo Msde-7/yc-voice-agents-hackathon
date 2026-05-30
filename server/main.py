@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import HTMLResponse
 from loguru import logger
+from pipecat.runner.types import WebSocketRunnerArguments
 from twilio.rest import Client as TwilioClient
 from twilio.twiml.voice_response import Connect, Stream, VoiceResponse
 
@@ -15,7 +16,6 @@ import analysis_store
 import call_store
 from bot import run_bot
 from business_context import get_business_context
-from pipecat.runner.types import WebSocketRunnerArguments
 from report import generate_report
 from scenario_generator import generate_scenarios
 from scenarios import SCENARIOS, Scenario
