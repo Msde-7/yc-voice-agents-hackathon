@@ -82,12 +82,21 @@ async def run_bot(
     )
     llm = NemotronLLMService()
 
+    _end_call_tools = ToolsSchema(standard_tools=[
+        FunctionSchema(
+            name="end_call",
+            description="End the phone call. Call this only after a natural conversation where you have asked your question and several follow-ups.",
+            properties={},
+            required=[],
+        )
+    ])
+
     async def end_call(params: FunctionCallParams):
-        """Tool the LLM calls to actually hang up the phone."""
         await params.result_callback("Ending call now.")
         await params.pipeline_worker.queue_frames([EndFrame()])
 
     llm.register_function("end_call", end_call)
+
     tts = GradiumTTSService(
         api_key=os.environ["GRADIUM_API_KEY"],
         settings=GradiumTTSService.Settings(
@@ -96,18 +105,13 @@ async def run_bot(
     )
 
     scenario = scenario_data if scenario_data is not None else SCENARIOS.get(scenario_id, SCENARIOS["general_support"])
-    tools = ToolsSchema(standard_tools=[
-        FunctionSchema(
-            name="end_call",
-            description="End the phone call. Call this when you have gathered enough information and are ready to hang up.",
-            properties={},
-            required=[],
-        )
-    ])
+
+    # Start with NO tools — prevents Nemotron calling end_call on turn 1.
+    # We inject end_call after the first assistant response.
     context = LLMContext(
         messages=[{"role": "system", "content": scenario["system_prompt"]}],
-        tools=tools,
     )
+    _tools_injected = False
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -156,8 +160,17 @@ async def run_bot(
     @transport.event_handler("on_client_connected")
     async def on_connected(transport, client):
         # Bot is the customer — trigger the LLM to speak first when the call connects.
+        # No tools yet: prevents Nemotron from calling end_call on turn 1.
         context.add_message({"role": "user", "content": "(The call just connected. Start the conversation as the customer.)"})
         await task.queue_frames([LLMRunFrame()])
+
+    @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
+    async def on_first_assistant_turn(aggregator, message):
+        nonlocal _tools_injected
+        if not _tools_injected:
+            _tools_injected = True
+            # Now that the bot has spoken at least once, enable end_call
+            await task.queue_frames([LLMSetToolsFrame(tools=_end_call_tools)])
 
     _finished = False
 

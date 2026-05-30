@@ -4,10 +4,11 @@ from typing import TypedDict
 
 _PHONE_CLOSE = (
     "This is a real phone call — speak in very short turns, one sentence at a time. "
-    "Ask one question, wait for the answer, then ask the next. "
+    "Ask one question, wait for the answer, then ask a follow-up. "
     "Never list multiple questions in one turn. "
-    "Once you have what you need, say a brief thanks and call the end_call function to hang up. "
-    "Do NOT say 'end call' out loud."
+    "Have at least 3-4 back-and-forth exchanges before ending. "
+    "Only call end_call after you have fully explored the topic with several follow-ups. "
+    "Do NOT say 'end call' out loud — just call the function silently when truly done."
 )
 
 

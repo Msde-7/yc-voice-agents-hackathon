@@ -28,7 +28,7 @@ Each object must have these exact keys:
 - "id": snake_case string identifier
 - "name": short display name
 - "description": one sentence describing what this scenario tests
-- "system_prompt": full system prompt for the AI customer agent — must (1) set up a specific realistic customer persona with a concrete goal, (2) include relevant details like student ID, dates, or context where appropriate, (3) instruct the agent to speak in very short turns — one sentence at a time, ask one question then wait, never list multiple questions at once, (4) end with: "Once you have what you need, say a brief thanks and call the end_call function to hang up. Do NOT say 'end call' out loud."
+- "system_prompt": full system prompt for the AI customer agent — must (1) set up a specific realistic customer persona with a concrete goal, (2) include relevant details like student ID, dates, or context where appropriate, (3) instruct the agent to speak in very short turns — one sentence at a time, ask one question then wait, never list multiple questions at once, have at least 3-4 back-and-forth exchanges, ask follow-ups after each answer before ending, (4) end with: "Only call end_call after you have fully explored the topic with several follow-ups. Do NOT say 'end call' out loud — just call the function silently when truly done."
 
 Example output format (do not copy content, only structure):
 {{"scenarios": [{{"id": "example_id", "name": "Example", "description": "Tests X.", "system_prompt": "You are..."}}]}}"""
