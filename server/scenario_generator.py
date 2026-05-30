@@ -80,21 +80,36 @@ async def generate_scenarios(business_context: str, count: int = 5) -> dict[str,
             raw = raw.rsplit("```", 1)[0].strip()
 
         parsed: Any = json.loads(raw)
+        logger.debug(f"Parsed scenario JSON type: {type(parsed).__name__}, keys/len: {list(parsed.keys()) if isinstance(parsed, dict) else len(parsed)}")
 
-        # Model may return {"scenarios": [...]} or a bare list
-        if isinstance(parsed, dict):
-            items = next(iter(parsed.values()))
-        else:
+        # Normalise to a flat list of scenario dicts regardless of what the model returned
+        if isinstance(parsed, list):
+            # Bare array
             items = parsed
+        elif isinstance(parsed, dict):
+            # Find the first value that is a list of dicts
+            items = None
+            for v in parsed.values():
+                if isinstance(v, list) and v and isinstance(v[0], dict):
+                    items = v
+                    break
+            if items is None:
+                # Dict of scenario dicts keyed by id or index: {"0": {...}, "admissions": {...}}
+                items = [v for v in parsed.values() if isinstance(v, dict)]
+        else:
+            raise ValueError(f"Unexpected top-level JSON type: {type(parsed)}")
 
         scenarios: dict[str, Scenario] = {}
         for item in items:
-            sid = item["id"]
+            if not isinstance(item, dict):
+                logger.warning(f"Skipping non-dict item in scenario list: {type(item)}")
+                continue
+            sid = item.get("id", f"scenario_{len(scenarios)}")
             scenarios[sid] = Scenario(
                 id=sid,
-                name=item["name"],
-                description=item["description"],
-                system_prompt=item["system_prompt"],
+                name=item.get("name", sid),
+                description=item.get("description", ""),
+                system_prompt=item.get("system_prompt", ""),
             )
 
         if not scenarios:
