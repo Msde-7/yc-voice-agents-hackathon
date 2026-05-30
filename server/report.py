@@ -137,7 +137,7 @@ async def generate_report(records: list[CallRecord]) -> CallReport:
         parsed = json.loads(clean)
     except json.JSONDecodeError as e:
         logger.error(f"LLM returned invalid JSON: {e}\nRaw: {raw[:800]}")
-        raise ValueError(f"Report generation failed: LLM returned invalid JSON") from e
+        raise ValueError("Report generation failed: LLM returned invalid JSON") from e
 
     parsed["generated_at"] = datetime.now(timezone.utc).isoformat()
     parsed["call_sids"] = [r.call_sid for r in usable]

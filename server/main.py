@@ -255,7 +255,6 @@ async def cancel_analysis(analysis_id: str):
     analysis_store.cancel(analysis_id)
 
     # Also cancel any calls that are currently active for this analysis
-    from_number = os.environ["TWILIO_PHONE_NUMBER"]
     cancelled_calls = 0
     for call_sid in record.call_sids:
         try:

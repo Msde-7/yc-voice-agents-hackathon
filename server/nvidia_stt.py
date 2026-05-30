@@ -9,9 +9,7 @@ import websockets
 import websockets.exceptions
 from loguru import logger
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,

@@ -20,7 +20,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.runner.types import RunnerArguments, SmallWebRTCRunnerArguments
+from pipecat.runner.types import RunnerArguments
 from pipecat.services.gradium.stt import GradiumSTTService
 from pipecat.services.gradium.tts import GradiumTTSService
 from pipecat.services.llm_service import FunctionCallParams

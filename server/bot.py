@@ -11,7 +11,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, LLMRunFrame
+from pipecat.frames.frames import EndFrame, LLMRunFrame, LLMSetToolsFrame
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask

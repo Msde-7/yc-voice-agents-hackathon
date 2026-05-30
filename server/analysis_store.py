@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
+import asyncio
 from typing import Literal
 
 from pydantic import BaseModel
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 from report_models import CallReport
 
 # Maps analysis_id → running asyncio.Task (not serialised — in-process only)
-_tasks: dict[str, "asyncio.Task"] = {}  # type: ignore[name-defined]
+_tasks: dict[str, asyncio.Task] = {}
 
 
 class AnalysisRecord(BaseModel):
@@ -56,7 +57,7 @@ def list_all() -> list[AnalysisRecord]:
     return list(_store.values())
 
 
-def register_task(id: str, task: "asyncio.Task") -> None:  # type: ignore[name-defined]
+def register_task(id: str, task: asyncio.Task) -> None:
     _tasks[id] = task
 
 
