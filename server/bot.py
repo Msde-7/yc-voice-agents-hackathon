@@ -1,5 +1,6 @@
 """Gunk voice agent pipeline — simulates a customer calling a business."""
 
+import asyncio
 import os
 import sys
 from collections.abc import Callable
@@ -177,14 +178,6 @@ async def run_bot(
 
     tracer.register_task_handlers(task, transport=transport)
 
-    @transport.event_handler("on_bot_started_speaking")
-    async def on_bot_speaking_start(transport, *args):
-        stt_gate.set_speaking(True)
-
-    @transport.event_handler("on_bot_stopped_speaking")
-    async def on_bot_speaking_stop(transport, *args):
-        stt_gate.set_speaking(False)
-
     @transport.event_handler("on_client_connected")
     async def on_connected(transport, client):
         # Bot is the customer — trigger the LLM to speak first when the call connects.
@@ -192,12 +185,20 @@ async def run_bot(
         context.add_message({"role": "user", "content": "(The call just connected. Start the conversation as the customer.)"})
         await task.queue_frames([LLMRunFrame()])
 
+    @context_aggregator.assistant().event_handler("on_assistant_turn_started")
+    async def on_assistant_speaking(aggregator):
+        # Mute STT while bot is generating/speaking to block Twilio echo
+        stt_gate.set_speaking(True)
+
     @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn(aggregator, message):
         nonlocal _assistant_turns
         _assistant_turns += 1
         if _assistant_turns == _MIN_TURNS_BEFORE_HANGUP:
             await task.queue_frames([LLMSetToolsFrame(tools=_end_call_tools)])
+        # Brief delay before unmuting — gives TTS time to finish playing
+        await asyncio.sleep(1.5)
+        stt_gate.set_speaking(False)
 
     _finished = False
 
