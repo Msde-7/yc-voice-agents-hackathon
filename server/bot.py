@@ -51,9 +51,9 @@ class STTGate(FrameProcessor):
         self._bot_speaking = speaking
 
     async def process_frame(self, frame: object, direction: FrameDirection) -> None:
-        if isinstance(frame, AudioRawFrame) and self._bot_speaking:
-            return  # swallow echo audio while bot is outputting
-        await self.push_frame(frame, direction)
+        if self._bot_speaking and isinstance(frame, AudioRawFrame):
+            return  # swallow echo audio while bot is outputting; let base handle everything else
+        await super().process_frame(frame, direction)
 
 
 async def run_bot(
