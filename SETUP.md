@@ -47,9 +47,11 @@ twilio login
 # Enter Account SID and Auth Token when prompted
 ```
 
-## 4. Cekura MCP (optional — for evaluation)
+## 4. Cekura (evaluation)
 
-Add the Cekura MCP server to Claude Code:
+The Cekura plugin is pre-registered in `.claude/settings.json` and will install automatically when Claude Code loads this project. No manual install needed.
+
+To also add the Cekura MCP server for direct API access:
 
 ```bash
 claude mcp add --transport http Cekura https://api.cekura.ai/mcp \

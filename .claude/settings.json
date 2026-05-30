@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "cekura-skills": {
+      "source": {
+        "source": "github",
+        "repo": "cekura-ai/cekura-skills"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "cekura@cekura-skills": true
+  }
+}
