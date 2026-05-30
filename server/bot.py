@@ -111,7 +111,8 @@ async def run_bot(
     context = LLMContext(
         messages=[{"role": "system", "content": scenario["system_prompt"]}],
     )
-    _tools_injected = False
+    _assistant_turns = 0
+    _MIN_TURNS_BEFORE_HANGUP = 3  # bot must speak at least 3 times before end_call is available
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -165,11 +166,10 @@ async def run_bot(
         await task.queue_frames([LLMRunFrame()])
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
-    async def on_first_assistant_turn(aggregator, message):
-        nonlocal _tools_injected
-        if not _tools_injected:
-            _tools_injected = True
-            # Now that the bot has spoken at least once, enable end_call
+    async def on_assistant_turn(aggregator, message):
+        nonlocal _assistant_turns
+        _assistant_turns += 1
+        if _assistant_turns == _MIN_TURNS_BEFORE_HANGUP:
             await task.queue_frames([LLMSetToolsFrame(tools=_end_call_tools)])
 
     _finished = False

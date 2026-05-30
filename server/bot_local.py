@@ -99,7 +99,8 @@ async def run_bot(transport: BaseTransport):
         ),
     )
 
-    _tools_injected = False
+    _assistant_turns = 0
+    _MIN_TURNS_BEFORE_HANGUP = 3
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -110,10 +111,10 @@ async def run_bot(transport: BaseTransport):
         await worker.queue_frames([LLMRunFrame()])
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
-    async def on_first_turn(aggregator, message):
-        nonlocal _tools_injected
-        if not _tools_injected:
-            _tools_injected = True
+    async def on_assistant_turn(aggregator, message):
+        nonlocal _assistant_turns
+        _assistant_turns += 1
+        if _assistant_turns == _MIN_TURNS_BEFORE_HANGUP:
             await worker.queue_frames([LLMSetToolsFrame(tools=_end_call_tools)])
 
     runner = WorkerRunner()
