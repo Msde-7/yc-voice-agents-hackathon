@@ -50,6 +50,11 @@ def _twiml_response(websocket_url: str, to_number: str, from_number: str) -> str
 
 
 def _make_twiml_url(request: Request) -> str:
+    # Allow explicit override via env var so frontend requests from localhost
+    # still produce a Twilio-reachable webhook URL (e.g. the ngrok public URL).
+    base = os.getenv("PUBLIC_BASE_URL")
+    if base:
+        return f"{base.rstrip('/')}/twiml"
     host = request.headers.get("host", "localhost")
     scheme = "https" if request.url.scheme == "https" else "http"
     return f"{scheme}://{host}/twiml"

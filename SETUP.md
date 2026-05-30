@@ -37,6 +37,7 @@ cp .env.example .env
 | `CEKURA_API_KEY` | [dashboard.cekura.ai](https://dashboard.cekura.ai) |
 | `CEKURA_AGENT_ID` | Cekura dashboard → your agent → integer ID |
 | `FIRECRAWL_API_KEY` | [firecrawl.dev](https://www.firecrawl.dev) — used for business website scraping |
+| `PUBLIC_BASE_URL` | Your ngrok URL (e.g. `https://xxxx.ngrok-free.app`) — required when using the frontend at `localhost`, so Twilio can reach the webhook |
 
 ## 3. Twilio CLI
 
