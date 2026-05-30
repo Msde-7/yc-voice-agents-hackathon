@@ -46,9 +46,8 @@ For each scenario:
 - name: short display name
 - description: one sentence describing what this scenario tests
 - system_prompt: 2-3 sentences. Set up a specific customer persona with a concrete goal \
-relevant to this business. Instruct the agent to ask one question at a time and wait for \
-the answer before asking the next. End with: "Only call end_call after several exchanges. \
-Do NOT say end call aloud.\""""
+relevant to this business. Open with a single question. Speak in short turns — one sentence \
+at a time, never list multiple questions at once."""
 
 
 async def generate_scenarios(business_context: str, count: int = 3) -> dict[str, Scenario]:

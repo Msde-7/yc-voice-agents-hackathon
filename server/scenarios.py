@@ -5,9 +5,7 @@ from typing import TypedDict
 _PHONE_CLOSE = (
     "Speak in very short turns — one sentence at a time, never list multiple questions. "
     "Ask one question, wait for the full answer, then ask one follow-up based on what you heard. "
-    "Have at least 3-4 exchanges before ending. "
-    "Only call end_call after you have fully explored the topic. "
-    "Do NOT say 'end call' out loud — just call the function silently."
+    "Have at least 3-4 exchanges before wrapping up."
 )
 
 

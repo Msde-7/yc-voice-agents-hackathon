@@ -26,9 +26,14 @@ def test_scenario_prompts_mention_phone_context():
         )
 
 
-def test_scenario_prompts_include_call_ending_instruction():
+def test_scenario_prompts_have_single_opening_question():
+    """Each prompt should direct the agent to open with a single question, not a list."""
     for scenario_id, scenario in SCENARIOS.items():
         prompt_lower = scenario["system_prompt"].lower()
-        assert "end" in prompt_lower or "thank" in prompt_lower, (
-            f"{scenario_id}: system_prompt should instruct the agent to end the call"
+        # Prompt should not enumerate multiple things to ask in one turn
+        assert "ask about" not in prompt_lower or "ask about their" in prompt_lower, (
+            f"{scenario_id}: prompt should not list multiple topics to ask about at once"
+        )
+        assert prompt_lower.count("and if they") == 0, (
+            f"{scenario_id}: prompt should not chain questions with 'and if they'"
         )
