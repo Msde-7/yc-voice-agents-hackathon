@@ -1,6 +1,5 @@
 """Gunk voice agent pipeline — simulates a customer calling a business."""
 
-import asyncio
 import os
 import sys
 from collections.abc import Callable
@@ -13,8 +12,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import AudioRawFrame, EndFrame, LLMRunFrame, LLMSetToolsFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -31,6 +29,7 @@ from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
 )
+from pipecat.workers.runner import WorkerRunner
 
 from nemotron_llm import NemotronLLMService
 from scenarios import SCENARIOS, Scenario
@@ -53,7 +52,7 @@ class STTGate(FrameProcessor):
 
     async def process_frame(self, frame: object, direction: FrameDirection) -> None:
         if self._bot_speaking and isinstance(frame, AudioRawFrame):
-            return  # swallow echo audio while bot is outputting; let base handle everything else
+            return
         await super().process_frame(frame, direction)
 
 
@@ -64,14 +63,7 @@ async def run_bot(
     on_finished: Callable[[list], None] | None = None,
     _call_data: dict | None = None,
 ):
-    """Build and run the Gunk Pipecat pipeline for a single call.
-
-    Args:
-        runner_args: Pipecat runner arguments (contains the WebSocket).
-        scenario_id: Which customer scenario to simulate.
-        on_finished: Optional callback invoked with context.messages when the pipeline ends.
-        _call_data: Pre-parsed telephony call data; parsed from the WebSocket if not provided.
-    """
+    """Build and run the Gunk Pipecat pipeline for a single call."""
     if _call_data is None:
         _transport_type, call_data = await parse_telephony_websocket(runner_args.websocket)
     else:
@@ -104,7 +96,7 @@ async def run_bot(
     _end_call_tools = ToolsSchema(standard_tools=[
         FunctionSchema(
             name="end_call",
-            description="End the phone call. Call this only after a natural conversation where you have asked your question and several follow-ups.",
+            description="End the phone call. Call this only after a natural conversation with several follow-ups.",
             properties={},
             required=[],
         )
@@ -125,13 +117,11 @@ async def run_bot(
 
     scenario = scenario_data if scenario_data is not None else SCENARIOS.get(scenario_id, SCENARIOS["general_support"])
 
-    # Start with NO tools — prevents Nemotron calling end_call on turn 1.
-    # We inject end_call after the first assistant response.
     context = LLMContext(
         messages=[{"role": "system", "content": scenario["system_prompt"]}],
     )
     _assistant_turns = 0
-    _MIN_TURNS_BEFORE_HANGUP = 3  # bot must speak at least 3 times before end_call is available
+    _MIN_TURNS_BEFORE_HANGUP = 3
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
@@ -155,8 +145,6 @@ async def run_bot(
         agent_id=int(os.environ["CEKURA_AGENT_ID"]),
     )
 
-    # Two-step setup so we can pass PipelineParams (audio rates, VAD)
-    # observe_and_create_task creates PipelineTask with no params, so we do it manually.
     pipeline = tracer.observe_pipeline(
         pipeline,
         context,
@@ -165,7 +153,9 @@ async def run_bot(
         custom_metadata={"scenario": scenario_id},
     )
 
-    task = PipelineTask(
+    # Use PipelineWorker + WorkerRunner — the documented pattern for telephony.
+    # PipelineTask + PipelineRunner doesn't route LLMRunFrame correctly.
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
             audio_in_sample_rate=8000,
@@ -176,22 +166,23 @@ async def run_bot(
         ),
     )
 
-    tracer.register_task_handlers(task, transport=transport)
+    # Register Cekura handlers on transport (audio recording + finalization)
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected_tracer(transport, client):
+        await tracer._on_client_connected()
 
-    # Prime the context and schedule the opening LLM trigger.
-    # We avoid on_client_connected because FastAPIWebsocketTransport fires it
-    # during setup (before our handler is registered), causing it to be missed.
-    context.add_message({"role": "user", "content": "(The call just connected. Start the conversation as the customer.)"})
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected_tracer(transport, client):
+        await tracer._finalize()
 
-    async def _trigger_opening():
-        await asyncio.sleep(0.5)
-        await task.queue_frames([LLMRunFrame()])
-
-    asyncio.create_task(_trigger_opening())
+    @transport.event_handler("on_client_connected")
+    async def on_connected(transport, client):
+        # Bot speaks first as the customer
+        context.add_message({"role": "user", "content": "(The call just connected. Start the conversation as the customer.)"})
+        await worker.queue_frames([LLMRunFrame()])
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_started")
     async def on_assistant_speaking(aggregator):
-        # Mute STT while bot is generating/speaking to block Twilio echo
         stt_gate.set_speaking(True)
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
@@ -199,9 +190,8 @@ async def run_bot(
         nonlocal _assistant_turns
         _assistant_turns += 1
         if _assistant_turns == _MIN_TURNS_BEFORE_HANGUP:
-            await task.queue_frames([LLMSetToolsFrame(tools=_end_call_tools)])
-        # Brief delay before unmuting — gives TTS time to finish playing
-        await asyncio.sleep(1.5)
+            await worker.queue_frames([LLMSetToolsFrame(tools=_end_call_tools)])
+        await __import__("asyncio").sleep(1.5)
         stt_gate.set_speaking(False)
 
     _finished = False
@@ -216,14 +206,9 @@ async def run_bot(
 
     @transport.event_handler("on_client_disconnected")
     async def on_disconnected(transport, client):
-        # User hung up — save transcript and end the pipeline.
         _call_on_finished()
-        await task.queue_frames([EndFrame()])
+        await worker.queue_frames([EndFrame()])
 
-    @task.event_handler("on_pipeline_finished")
-    async def on_pipeline_finished(task_instance, frame):
-        # Pipeline ended (e.g. via end_call tool) — save transcript.
-        _call_on_finished()
-
-    runner = PipelineRunner(handle_sigint=False)
-    await runner.run(task)
+    runner = WorkerRunner()
+    await runner.run(worker)
+    _call_on_finished()
