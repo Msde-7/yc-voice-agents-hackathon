@@ -5,7 +5,8 @@ from typing import TypedDict
 _PHONE_CLOSE = (
     "Keep all responses short and conversational — this is a phone call. "
     "Once you have gathered enough information about how this business handles your request, "
-    "thank them and politely end the call."
+    "say a brief thank you, then call the end_call function to hang up. "
+    "Do NOT say 'end call' out loud — just call the function."
 )
 
 

@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, LLMRunFrame
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -19,6 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import parse_telephony_websocket
 from pipecat.serializers.twilio import TwilioFrameSerializer
+from pipecat.services.gradium.stt import GradiumSTTService
 from pipecat.services.gradium.tts import GradiumTTSService
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketParams,
@@ -26,7 +31,6 @@ from pipecat.transports.websocket.fastapi import (
 )
 
 from nemotron_llm import NemotronLLMService
-from nvidia_stt import NvidiaWebSocketSTTService
 from scenarios import SCENARIOS
 
 load_dotenv()
@@ -71,8 +75,18 @@ async def run_bot(
         ),
     )
 
-    stt = NvidiaWebSocketSTTService()
+    stt = GradiumSTTService(
+        api_key=os.environ["GRADIUM_API_KEY"],
+        settings=GradiumSTTService.Settings(language="en"),
+    )
     llm = NemotronLLMService()
+
+    async def end_call(params: FunctionCallParams):
+        """Tool the LLM calls to actually hang up the phone."""
+        await params.result_callback("Ending call now.")
+        await params.pipeline_worker.queue_frames([EndFrame()])
+
+    llm.register_function("end_call", end_call)
     tts = GradiumTTSService(
         api_key=os.environ["GRADIUM_API_KEY"],
         settings=GradiumTTSService.Settings(
@@ -81,8 +95,17 @@ async def run_bot(
     )
 
     scenario = SCENARIOS[scenario_id]
+    tools = ToolsSchema(standard_tools=[
+        FunctionSchema(
+            name="end_call",
+            description="End the phone call. Call this when you have gathered enough information and are ready to hang up.",
+            properties={},
+            required=[],
+        )
+    ])
     context = LLMContext(
-        messages=[{"role": "system", "content": scenario["system_prompt"]}]
+        messages=[{"role": "system", "content": scenario["system_prompt"]}],
+        tools=tools,
     )
     context_aggregator = LLMContextAggregatorPair(
         context,
@@ -123,16 +146,38 @@ async def run_bot(
             audio_out_sample_rate=8000,
             enable_metrics=True,
             enable_usage_metrics=True,
-            allow_interruptions=True,
+            allow_interruptions=False,
         ),
     )
 
     tracer.register_task_handlers(task, transport=transport)
 
-    if on_finished is not None:
-        @task.event_handler("on_pipeline_finished")
-        async def _on_finished(task_instance, frame):
+    @transport.event_handler("on_client_connected")
+    async def on_connected(transport, client):
+        # Bot is the customer — trigger the LLM to speak first when the call connects.
+        context.add_message({"role": "user", "content": "(The call just connected. Start the conversation as the customer.)"})
+        await task.queue_frames([LLMRunFrame()])
+
+    _finished = False
+
+    def _call_on_finished():
+        nonlocal _finished
+        if _finished:
+            return
+        _finished = True
+        if on_finished is not None:
             on_finished(list(context.messages))
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_disconnected(transport, client):
+        # User hung up — save transcript and end the pipeline.
+        _call_on_finished()
+        await task.queue_frames([EndFrame()])
+
+    @task.event_handler("on_pipeline_finished")
+    async def on_pipeline_finished(task_instance, frame):
+        # Pipeline ended (e.g. via end_call tool) — save transcript.
+        _call_on_finished()
 
     runner = PipelineRunner(handle_sigint=False)
     await runner.run(task)

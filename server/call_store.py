@@ -43,3 +43,7 @@ def get(call_sid: str) -> CallRecord | None:
 
 def list_all() -> list[CallRecord]:
     return list(_store.values())
+
+
+def list_by_number(to_number: str) -> list[CallRecord]:
+    return [r for r in _store.values() if r.to_number == to_number]

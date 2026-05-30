@@ -117,11 +117,20 @@ async def generate_report(records: list[CallRecord]) -> CallReport:
             data = await resp.json()
 
     raw = data["choices"][0]["message"]["content"]
+    logger.debug(f"Report LLM raw response: {raw[:800]}")
+
+    # Strip markdown code fences if the model wrapped the JSON
+    clean = raw.strip()
+    if clean.startswith("```"):
+        clean = clean.split("```", 2)[1]
+        if clean.startswith("json"):
+            clean = clean[4:]
+        clean = clean.rsplit("```", 1)[0].strip()
 
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(clean)
     except json.JSONDecodeError as e:
-        logger.error(f"LLM returned invalid JSON: {e}\nRaw: {raw[:500]}")
+        logger.error(f"LLM returned invalid JSON: {e}\nRaw: {raw[:800]}")
         raise ValueError(f"Report generation failed: LLM returned invalid JSON") from e
 
     parsed["generated_at"] = datetime.now(timezone.utc).isoformat()

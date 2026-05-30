@@ -6,6 +6,7 @@ import os
 from typing import AsyncGenerator
 
 import websockets
+import websockets.exceptions
 from loguru import logger
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -27,7 +28,7 @@ class NvidiaWebSocketSTTService(STTService):
         super().__init__(**kwargs)
         self._url = url or os.environ["NVIDIA_ASR_URL"]
         self._language = language
-        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._ws: websockets.ClientConnection | None = None
         self._receive_task: asyncio.Task | None = None
 
     async def start(self, frame: Frame):
@@ -50,8 +51,11 @@ class NvidiaWebSocketSTTService(STTService):
         await super().cancel(frame)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        if self._ws and not self._ws.closed:
-            await self._ws.send(audio)
+        if self._ws is not None:
+            try:
+                await self._ws.send(audio)
+            except websockets.exceptions.ConnectionClosed:
+                pass
         yield  # yields nothing; transcripts come via _receive_loop
 
     async def _receive_loop(self):
