@@ -134,7 +134,6 @@ async def run_bot(
     pipeline = Pipeline(
         [
             transport.input(),
-            stt_gate,
             stt,
             context_aggregator.user(),
             llm,
