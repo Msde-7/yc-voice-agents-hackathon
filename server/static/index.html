@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gunk — AI Voice Agent Analysis</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0f14;
+      --surface:   #161b25;
+      --surface2:  #1e2636;
+      --border:    #2a3347;
+      --accent:    #4f8ef7;
+      --accent2:   #7c5cbf;
+      --success:   #34c77b;
+      --warning:   #f59e0b;
+      --danger:    #ef4444;
+      --text:      #e8edf5;
+      --muted:     #7a8ba8;
+      --radius:    10px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    /* ── Header ─────────────────────────────── */
+    header {
+      background: linear-gradient(135deg, #111827 0%, #1a2236 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 1.5rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .logo-icon {
+      width: 44px; height: 44px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+    }
+    .logo-text h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.5px; }
+    .logo-text p  { font-size: 0.82rem; color: var(--muted); }
+
+    /* ── Layout ──────────────────────────────── */
+    main {
+      max-width: 860px;
+      margin: 2.5rem auto;
+      padding: 0 1.5rem;
+    }
+
+    /* ── Card ────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.8rem 2rem;
+      margin-bottom: 1.5rem;
+    }
+    .card-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 1.2rem;
+    }
+
+    /* ── Form ────────────────────────────────── */
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .form-row.single { grid-template-columns: 1fr; }
+    label { display: block; font-size: 0.83rem; color: var(--muted); margin-bottom: 0.35rem; }
+    input[type="url"], input[type="tel"], input[type="number"] {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--text);
+      font-size: 0.95rem;
+      padding: 0.65rem 0.9rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: var(--accent); }
+    input::placeholder { color: var(--muted); }
+
+    .form-footer {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 1.2rem;
+    }
+    .count-wrap { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--muted); }
+    .count-wrap input { width: 62px; }
+
+    button {
+      background: linear-gradient(135deg, var(--accent), #3a6fd8);
+      color: #fff;
+      border: none;
+      border-radius: 7px;
+      padding: 0.7rem 1.8rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    button:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+    button.danger {
+      background: linear-gradient(135deg, var(--danger), #c53030);
+      margin-left: auto;
+    }
+    button.secondary {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    /* ── Progress ────────────────────────────── */
+    .hidden { display: none !important; }
+
+    .stage-list { list-style: none; }
+    .stage { display: flex; align-items: flex-start; gap: 0.9rem; padding: 0.65rem 0; border-bottom: 1px solid var(--border); }
+    .stage:last-child { border-bottom: none; }
+    .stage-icon {
+      flex-shrink: 0;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+    }
+    .stage-icon.done   { background: #0f3d26; border-color: var(--success); color: var(--success); }
+    .stage-icon.active { background: #0d2a4a; border-color: var(--accent); }
+    .stage-icon.failed { background: #3d0f0f; border-color: var(--danger); color: var(--danger); }
+    .stage-body { flex: 1; }
+    .stage-label { font-size: 0.92rem; font-weight: 500; }
+    .stage-detail { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+
+    /* spinner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
+
+    /* ── Calls table ─────────────────────────── */
+    .calls-list { margin-top: 0.6rem; }
+    .call-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      background: var(--surface2);
+      margin-bottom: 0.4rem;
+      font-size: 0.85rem;
+    }
+    .call-row .scenario { flex: 1; color: var(--text); font-family: monospace; font-size: 0.78rem; }
+    .call-row .call-sid  { color: var(--muted); font-family: monospace; font-size: 0.72rem; }
+
+    /* ── Badges ──────────────────────────────── */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.15rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+    .badge-initiated  { background: #1a2d44; color: #7cb3f7; border: 1px solid #2a4870; }
+    .badge-in_progress{ background: #2d2900; color: #f5c844; border: 1px solid #5c4d00; }
+    .badge-completed  { background: #0c2e1a; color: #4dca88; border: 1px solid #1a5c35; }
+    .badge-failed     { background: #2d0d0d; color: #f07070; border: 1px solid #5c1a1a; }
+    .badge-running    { background: #1a2d44; color: #7cb3f7; border: 1px solid #2a4870; }
+    .badge-cancelled  { background: #2a1f1f; color: #a07070; border: 1px solid #4a2a2a; }
+    .badge-yes        { background: #0c2e1a; color: #4dca88; border: 1px solid #1a5c35; }
+    .badge-no         { background: #2d1919; color: #e07070; border: 1px solid #5c2020; }
+
+    /* ── Report ──────────────────────────────── */
+    .score-wrap {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      margin-bottom: 1.5rem;
+    }
+    .score-gauge {
+      position: relative;
+      width: 110px; height: 110px;
+      flex-shrink: 0;
+    }
+    .score-gauge svg { transform: rotate(-90deg); }
+    .score-gauge .track { fill: none; stroke: var(--surface2); stroke-width: 10; }
+    .score-gauge .fill  { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
+    .score-number {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.6rem;
+      font-weight: 700;
+    }
+    .score-number small { font-size: 0.65rem; color: var(--muted); font-weight: 400; }
+    .score-info h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 0.3rem; }
+    .score-info p  { color: var(--muted); font-size: 0.9rem; }
+
+    .section-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin: 1.4rem 0 0.7rem;
+    }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+    th {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    td { padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+
+    .conf-bar-wrap { display: flex; align-items: center; gap: 0.6rem; }
+    .conf-bar-bg {
+      flex: 1;
+      height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .conf-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--success));
+      border-radius: 3px;
+      transition: width 0.6s ease;
+    }
+    .conf-pct { font-size: 0.75rem; color: var(--muted); min-width: 30px; text-align: right; }
+
+    .summary-box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 1rem 1.2rem;
+      font-size: 0.9rem;
+      line-height: 1.65;
+      color: var(--text);
+    }
+
+    .actions-list { list-style: none; }
+    .actions-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.6rem;
+      padding: 0.45rem 0;
+      font-size: 0.88rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .actions-list li:last-child { border-bottom: none; }
+    .actions-list li::before { content: "→"; color: var(--accent); flex-shrink: 0; margin-top: 0.05rem; }
+
+    .error-box {
+      background: #1f0c0c;
+      border: 1px solid #5c1a1a;
+      border-radius: 7px;
+      padding: 1rem 1.2rem;
+      color: #f07070;
+      font-size: 0.9rem;
+    }
+
+    /* ── Responsive ──────────────────────────── */
+    @media (max-width: 600px) {
+      .form-row { grid-template-columns: 1fr; }
+      .score-wrap { flex-direction: column; align-items: flex-start; }
+      header { padding: 1rem; }
+      main { padding: 0 1rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo-icon">🔊</div>
+  <div class="logo-text">
+    <h1>Gunk</h1>
+    <p>AI-powered voice agent analysis</p>
+  </div>
+</header>
+
+<main>
+
+  <!-- Input form -->
+  <div class="card" id="form-card">
+    <div class="card-title">Start Analysis</div>
+
+    <div class="form-row">
+      <div>
+        <label for="website">Business Website</label>
+        <input type="url" id="website" placeholder="https://acmehotel.com" />
+      </div>
+      <div>
+        <label for="phone">Phone Number</label>
+        <input type="tel" id="phone" placeholder="+15551234567" />
+      </div>
+    </div>
+
+    <div class="form-footer">
+      <div class="count-wrap">
+        <label for="count" style="margin:0;">Scenarios:</label>
+        <input type="number" id="count" value="3" min="1" max="10" />
+      </div>
+      <button id="analyze-btn" onclick="startAnalysis()">Analyze</button>
+    </div>
+
+    <div id="form-error" class="error-box hidden" style="margin-top:1rem;"></div>
+  </div>
+
+  <!-- Progress panel -->
+  <div class="card hidden" id="progress-card">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.2rem;">
+      <div class="card-title" style="margin:0;">Analysis Progress</div>
+      <div style="display:flex; gap:0.6rem; align-items:center;">
+        <span id="status-badge" class="badge badge-running">running</span>
+        <button class="danger hidden" id="cancel-btn" onclick="cancelAnalysis()">Cancel</button>
+      </div>
+    </div>
+
+    <ul class="stage-list">
+      <li class="stage" id="stage-scrape">
+        <div class="stage-icon" id="icon-scrape">1</div>
+        <div class="stage-body">
+          <div class="stage-label">Scraping website</div>
+          <div class="stage-detail" id="detail-scrape">Waiting…</div>
+        </div>
+      </li>
+      <li class="stage" id="stage-scenarios">
+        <div class="stage-icon" id="icon-scenarios">2</div>
+        <div class="stage-body">
+          <div class="stage-label">Generating scenarios</div>
+          <div class="stage-detail" id="detail-scenarios">Waiting…</div>
+        </div>
+      </li>
+      <li class="stage" id="stage-calls">
+        <div class="stage-icon" id="icon-calls">3</div>
+        <div class="stage-body">
+          <div class="stage-label">Running calls</div>
+          <div class="stage-detail" id="detail-calls">Waiting…</div>
+          <div class="calls-list hidden" id="calls-list"></div>
+        </div>
+      </li>
+      <li class="stage" id="stage-report">
+        <div class="stage-icon" id="icon-report">4</div>
+        <div class="stage-body">
+          <div class="stage-label">Generating report</div>
+          <div class="stage-detail" id="detail-report">Waiting…</div>
+        </div>
+      </li>
+    </ul>
+  </div>
+
+  <!-- Report panel -->
+  <div class="card hidden" id="report-card">
+    <div class="card-title">Automation Analysis Report</div>
+
+    <div class="score-wrap">
+      <div class="score-gauge">
+        <svg width="110" height="110" viewBox="0 0 110 110">
+          <circle class="track" cx="55" cy="55" r="45"/>
+          <circle class="fill" id="gauge-fill" cx="55" cy="55" r="45"
+                  stroke-dasharray="283" stroke-dashoffset="283"/>
+        </svg>
+        <div class="score-number">
+          <span id="score-pct">—</span>
+          <small>automation</small>
+        </div>
+      </div>
+      <div class="score-info">
+        <h2 id="score-headline">Analysis complete</h2>
+        <p id="score-subline">Review the detailed breakdown below.</p>
+      </div>
+    </div>
+
+    <div class="section-label">Flow Step Breakdown</div>
+    <div style="overflow-x:auto;">
+      <table id="flow-table">
+        <thead>
+          <tr>
+            <th>Topic</th>
+            <th>Automatable</th>
+            <th style="min-width:140px;">Confidence</th>
+            <th>Reasoning</th>
+          </tr>
+        </thead>
+        <tbody id="flow-body"></tbody>
+      </table>
+    </div>
+
+    <div class="section-label">Summary</div>
+    <div class="summary-box" id="summary-text"></div>
+
+    <div class="section-label">Recommended Actions</div>
+    <ul class="actions-list" id="actions-list"></ul>
+
+    <div style="margin-top:1.5rem;">
+      <button class="secondary" onclick="resetForm()">New Analysis</button>
+    </div>
+  </div>
+
+  <!-- Error panel -->
+  <div class="card hidden" id="error-card">
+    <div class="card-title">Analysis Failed</div>
+    <div class="error-box" id="error-text"></div>
+    <div style="margin-top:1rem;">
+      <button class="secondary" onclick="resetForm()">Try Again</button>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  let currentAnalysisId = null;
+  let pollTimer = null;
+  let eventSource = null;
+  let lastCallSids = [];
+
+  /* ── Utilities ───────────────────────────────── */
+
+  function el(id) { return document.getElementById(id); }
+
+  function show(id) { el(id).classList.remove('hidden'); }
+  function hide(id) { el(id).classList.add('hidden'); }
+  function isHidden(id) { return el(id).classList.contains('hidden'); }
+
+  function setIcon(id, state) {
+    const icon = el(id);
+    icon.className = 'stage-icon ' + state;
+    if (state === 'active') {
+      icon.innerHTML = '<span class="spinner"></span>';
+    } else if (state === 'done') {
+      icon.innerHTML = '✓';
+    } else if (state === 'failed') {
+      icon.innerHTML = '✗';
+    }
+    // leave number text for pending
+  }
+
+  function badgeHtml(status) {
+    const cls = 'badge badge-' + (status || 'initiated').replace(/[^a-z_]/g, '_');
+    return `<span class="${cls}">${status}</span>`;
+  }
+
+  function scoreColor(score) {
+    if (score >= 0.75) return '#34c77b';
+    if (score >= 0.5)  return '#f59e0b';
+    return '#ef4444';
+  }
+
+  /* ── Form ────────────────────────────────────── */
+
+  async function startAnalysis() {
+    const website  = el('website').value.trim();
+    const phone    = el('phone').value.trim();
+    const count    = parseInt(el('count').value, 10) || 3;
+
+    hide('form-error');
+
+    if (!website)  return showFormError('Please enter a business website URL.');
+    if (!phone)    return showFormError('Please enter the phone number in E.164 format (e.g. +15551234567).');
+    if (!/^\+\d{7,15}$/.test(phone)) return showFormError('Phone number must be in E.164 format: +15551234567');
+
+    el('analyze-btn').disabled = true;
+
+    let data;
+    try {
+      const res = await fetch('/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: phone, website, count }),
+      });
+      data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Server error');
+      }
+    } catch (err) {
+      el('analyze-btn').disabled = false;
+      return showFormError(err.message);
+    }
+
+    currentAnalysisId = data.id;
+    lastCallSids = [];
+    hide('form-card');
+    show('progress-card');
+    show('cancel-btn');
+    hide('report-card');
+    hide('error-card');
+
+    // reset stages
+    ['scrape','scenarios','calls','report'].forEach(s => {
+      const icon = el('icon-' + s);
+      icon.className = 'stage-icon';
+      icon.innerHTML = { scrape:'1', scenarios:'2', calls:'3', report:'4' }[s];
+    });
+    el('detail-scrape').textContent    = 'Waiting…';
+    el('detail-scenarios').textContent = 'Waiting…';
+    el('detail-calls').textContent     = 'Waiting…';
+    el('detail-report').textContent    = 'Waiting…';
+    el('calls-list').innerHTML = '';
+    hide('calls-list');
+
+    startSSE(data.id);
+  }
+
+  function showFormError(msg) {
+    el('form-error').textContent = msg;
+    show('form-error');
+  }
+
+  function resetForm() {
+    stopTracking();
+    currentAnalysisId = null;
+    lastCallSids = [];
+    el('analyze-btn').disabled = false;
+    hide('progress-card');
+    hide('report-card');
+    hide('error-card');
+    show('form-card');
+  }
+
+  async function cancelAnalysis() {
+    if (!currentAnalysisId) return;
+    el('cancel-btn').disabled = true;
+    try {
+      await fetch(`/analyze/${currentAnalysisId}/cancel`, { method: 'POST' });
+    } catch (e) { /* ignore */ }
+    el('cancel-btn').disabled = false;
+  }
+
+  /* ── SSE / Polling ───────────────────────────── */
+
+  function startSSE(id) {
+    stopTracking();
+    // Use SSE if EventSource is available
+    if (typeof EventSource !== 'undefined') {
+      eventSource = new EventSource(`/analyze/${id}/events`);
+      eventSource.onmessage = (e) => {
+        try { applyUpdate(JSON.parse(e.data)); } catch (_) {}
+      };
+      eventSource.onerror = () => {
+        // Fall back to polling on SSE error
+        if (eventSource) { eventSource.close(); eventSource = null; }
+        startPolling(id);
+      };
+    } else {
+      startPolling(id);
+    }
+  }
+
+  function startPolling(id) {
+    pollTimer = setInterval(async () => {
+      try {
+        const res = await fetch(`/analyze/${id}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        // also fetch call details
+        const calls = await Promise.all(
+          (data.call_sids || []).map(sid => fetch(`/calls/${sid}`).then(r => r.json()).catch(() => null))
+        );
+        data.calls = calls.filter(Boolean);
+        applyUpdate(data);
+      } catch (_) {}
+    }, 3000);
+  }
+
+  function stopTracking() {
+    if (eventSource) { eventSource.close(); eventSource = null; }
+    if (pollTimer)   { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  /* ── UI Updates ──────────────────────────────── */
+
+  function applyUpdate(data) {
+    const { status, business_context, scenarios, call_sids, calls, report, error } = data;
+
+    // Status badge
+    el('status-badge').className = 'badge badge-' + status;
+    el('status-badge').textContent = status;
+
+    // Cancel button
+    if (status === 'running') { show('cancel-btn'); } else { hide('cancel-btn'); }
+
+    // Stage 1: scraping
+    if (business_context) {
+      setIcon('icon-scrape', 'done');
+      el('detail-scrape').textContent = 'Business context captured (' + Math.round(business_context.length / 1024) + ' KB)';
+    } else if (status === 'running') {
+      setIcon('icon-scrape', 'active');
+      el('detail-scrape').textContent = 'Scraping website…';
+    }
+
+    // Stage 2: scenarios
+    if (scenarios && scenarios.length > 0) {
+      setIcon('icon-scenarios', 'done');
+      el('detail-scenarios').textContent = scenarios.length + ' scenario' + (scenarios.length !== 1 ? 's' : '') + ' generated';
+    } else if (business_context && status === 'running') {
+      setIcon('icon-scenarios', 'active');
+      el('detail-scenarios').textContent = 'Generating scenarios…';
+    }
+
+    // Stage 3: calls
+    const callList = calls || [];
+    if (callList.length > 0) {
+      setIcon('icon-calls', 'active');
+      const done = callList.filter(c => c.status === 'completed' || c.status === 'failed').length;
+      el('detail-calls').textContent = `${done} / ${callList.length} calls completed`;
+      show('calls-list');
+      renderCalls(callList, scenarios || []);
+      if (done === callList.length && done > 0) {
+        setIcon('icon-calls', 'done');
+      }
+    } else if (scenarios && scenarios.length > 0 && status === 'running') {
+      setIcon('icon-calls', 'active');
+      el('detail-calls').textContent = 'Initiating calls…';
+    }
+
+    // Stage 4: report
+    if (report) {
+      setIcon('icon-report', 'done');
+      el('detail-report').textContent = 'Report ready';
+    } else if (callList.length > 0 && callList.every(c => c.status === 'completed' || c.status === 'failed') && status === 'running') {
+      setIcon('icon-report', 'active');
+      el('detail-report').textContent = 'Generating report…';
+    }
+
+    // Terminal states
+    if (status === 'completed' && report) {
+      stopTracking();
+      renderReport(report);
+      show('report-card');
+    } else if (status === 'failed') {
+      stopTracking();
+      setIcon('icon-scrape',    'failed');
+      el('error-text').textContent = error || 'An unknown error occurred.';
+      show('error-card');
+    } else if (status === 'cancelled') {
+      stopTracking();
+      el('status-badge').className = 'badge badge-cancelled';
+      hide('cancel-btn');
+    }
+  }
+
+  function renderCalls(calls, scenarios) {
+    const container = el('calls-list');
+    calls.forEach(call => {
+      const existing = container.querySelector(`[data-sid="${call.call_sid}"]`);
+      const html = `
+        <div class="call-row" data-sid="${call.call_sid}">
+          <span class="scenario">${call.scenario_id || '—'}</span>
+          <span class="call-sid">${call.call_sid ? call.call_sid.slice(0, 16) + '…' : ''}</span>
+          ${badgeHtml(call.status)}
+        </div>`;
+      if (existing) {
+        existing.outerHTML = html;
+      } else {
+        container.insertAdjacentHTML('beforeend', html);
+      }
+    });
+  }
+
+  /* ── Report rendering ────────────────────────── */
+
+  function renderReport(report) {
+    const score = report.automation_score || 0;
+    const pct   = Math.round(score * 100);
+
+    // Gauge
+    const circumference = 283;
+    const offset = circumference - (score * circumference);
+    const fill = el('gauge-fill');
+    fill.style.strokeDashoffset = offset;
+    fill.style.stroke = scoreColor(score);
+
+    el('score-pct').textContent = pct + '%';
+
+    // Headline
+    let headline, subline;
+    if (pct >= 75) {
+      headline = 'Highly Automatable';
+      subline  = 'Most of this support flow is a strong candidate for AI automation.';
+    } else if (pct >= 50) {
+      headline = 'Partially Automatable';
+      subline  = 'Significant portions of this flow could be handled by AI with some customisation.';
+    } else {
+      headline = 'Low Automation Potential';
+      subline  = 'This support flow currently requires mostly human handling.';
+    }
+    el('score-headline').textContent = headline;
+    el('score-subline').textContent  = subline;
+
+    // Flow steps
+    const tbody = el('flow-body');
+    tbody.innerHTML = '';
+    (report.flow_steps || []).forEach(step => {
+      const confPct = Math.round((step.confidence || 0) * 100);
+      const auto    = step.can_automate;
+      tbody.insertAdjacentHTML('beforeend', `
+        <tr>
+          <td>${escHtml(step.topic || '')}</td>
+          <td>${auto ? '<span class="badge badge-yes">Yes</span>' : '<span class="badge badge-no">No</span>'}</td>
+          <td>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:${confPct}%"></div></div>
+              <span class="conf-pct">${confPct}%</span>
+            </div>
+          </td>
+          <td style="color:var(--muted); font-size:0.82rem;">${escHtml(step.reasoning || '')}${step.example_quote ? '<br><em style="color:#5a7a9a;">"' + escHtml(step.example_quote) + '"</em>' : ''}</td>
+        </tr>`);
+    });
+
+    // Summary
+    el('summary-text').textContent = report.summary || '';
+
+    // Actions
+    const ul = el('actions-list');
+    ul.innerHTML = '';
+    (report.recommended_actions || []).forEach(action => {
+      ul.insertAdjacentHTML('beforeend', `<li>${escHtml(action)}</li>`);
+    });
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+</script>
+</body>
+</html>

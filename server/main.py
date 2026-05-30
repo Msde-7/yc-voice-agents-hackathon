@@ -1,12 +1,14 @@
 """Gunk FastAPI server — handles Twilio webhooks and WebSocket audio streams."""
 
 import asyncio
+import json
 import os
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pipecat.runner.types import WebSocketRunnerArguments
 from twilio.rest import Client as TwilioClient
@@ -346,3 +348,42 @@ async def create_report(request: Request):
 
     report = await generate_report(records)
     return report.model_dump(mode="json")
+
+
+@app.get("/analyze/{analysis_id}/events")
+async def analysis_events(analysis_id: str):
+    """Stream real-time analysis updates as Server-Sent Events."""
+    record = analysis_store.get(analysis_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Analysis {analysis_id} not found")
+
+    async def event_generator():
+        terminal = {"completed", "failed", "cancelled"}
+        while True:
+            rec = analysis_store.get(analysis_id)
+            if rec is None:
+                break
+            # Include call records for this analysis
+            calls = [call_store.get(sid) for sid in rec.call_sids]
+            calls_data = [c.model_dump(mode="json") for c in calls if c is not None]
+            payload = rec.model_dump(mode="json")
+            payload["calls"] = calls_data
+            yield f"data: {json.dumps(payload)}\n\n"
+            if rec.status in terminal:
+                break
+            await asyncio.sleep(2)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# Static files must be mounted LAST — it acts as a catch-all and would shadow API routes.
+_static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_static_dir):
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")
