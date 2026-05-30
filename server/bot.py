@@ -55,9 +55,10 @@ class STTGate(FrameProcessor):
         self._muted = False
 
     async def process_frame(self, frame: object, direction: FrameDirection) -> None:
-        if self._muted and isinstance(frame, AudioRawFrame):
-            return
         await super().process_frame(frame, direction)
+        if self._muted and isinstance(frame, AudioRawFrame):
+            return  # drop echo audio; super() already handled lifecycle
+        await self.push_frame(frame, direction)
 
 
 async def run_bot(
@@ -134,6 +135,7 @@ async def run_bot(
     pipeline = Pipeline(
         [
             transport.input(),
+            stt_gate,
             stt,
             context_aggregator.user(),
             llm,
