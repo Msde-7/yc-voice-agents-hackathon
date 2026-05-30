@@ -1,43 +1,61 @@
-"""Generates tailored call scenarios for a specific business using Nemotron."""
+"""Generates tailored call scenarios for a specific business using Nemotron structured output."""
 
 import json
 import os
-from typing import Any
 
 import aiohttp
 from loguru import logger
 
 from scenarios import SCENARIOS, Scenario
 
+_SCENARIO_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "scenarios": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "system_prompt": {"type": "string"},
+                },
+                "required": ["id", "name", "description", "system_prompt"],
+            },
+        }
+    },
+    "required": ["scenarios"],
+}
+
 _SYSTEM_PROMPT = """\
 You are an expert in customer support call testing for AI voice agents.
 Given a description of a business, generate realistic customer call scenarios
-that would test their support capabilities across different interaction types.
-Respond ONLY with valid JSON — no explanation, no markdown."""
+that test their support capabilities across different interaction types."""
 
 _USER_PROMPT = """\
 Business context:
 {context}
 
 Generate exactly {count} customer call scenarios for testing this business's phone support.
-Each scenario should represent a realistic customer need specific to this type of business.
-Cover a mix of: simple information requests, service bookings, complaints/issues, and product/pricing questions.
+Cover a mix of: simple information requests, service bookings, complaints/issues, and pricing questions.
 
-You MUST output a JSON object with a single key "scenarios" whose value is an array of exactly {count} objects.
-Each object must have these exact keys:
-- "id": snake_case string identifier
-- "name": short display name
-- "description": one sentence describing what this scenario tests
-- "system_prompt": system prompt for the AI customer agent (max 3 sentences). Must: set up a specific customer persona with a concrete goal relevant to this business, instruct one-question-at-a-time with follow-ups, end with: "Only call end_call after several exchanges. Do NOT say end call aloud."
-
-Example output format (do not copy content, only structure):
-{{"scenarios": [{{"id": "example_id", "name": "Example", "description": "Tests X.", "system_prompt": "You are..."}}]}}"""
+For each scenario:
+- id: short snake_case identifier
+- name: short display name
+- description: one sentence describing what this scenario tests
+- system_prompt: 2-3 sentences. Set up a specific customer persona with a concrete goal \
+relevant to this business. Instruct the agent to ask one question at a time and wait for \
+the answer before asking the next. End with: "Only call end_call after several exchanges. \
+Do NOT say end call aloud.\""""
 
 
-async def generate_scenarios(business_context: str, count: int = 5) -> dict[str, Scenario]:
+async def generate_scenarios(business_context: str, count: int = 3) -> dict[str, Scenario]:
     """Generate tailored call scenarios for the given business context.
 
-    Falls back to the static default scenarios if generation fails.
+    Uses json_schema structured output to guarantee the response matches the
+    expected shape. Falls back to the static default scenarios if generation fails.
     """
     if not business_context.strip():
         logger.warning("No business context — using default scenarios")
@@ -46,20 +64,22 @@ async def generate_scenarios(business_context: str, count: int = 5) -> dict[str,
     llm_url = os.environ["NEMOTRON_LLM_URL"]
     model = os.getenv("NEMOTRON_LLM_MODEL", "nvidia/nemotron-3-super")
 
-    prompt = _USER_PROMPT.format(context=business_context[:4000], count=count)
-
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": _USER_PROMPT.format(context=business_context[:4000], count=count)},
         ],
-        "response_format": {"type": "json_object"},
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "scenarios", "schema": _SCENARIO_SCHEMA},
+        },
         "temperature": 0.7,
-        "max_tokens": 4096,
+        "max_tokens": 2048,
+        "chat_template_kwargs": {"enable_thinking": False},
     }
 
-    logger.info(f"Generating {count} tailored scenarios via Nemotron")
+    logger.info(f"Generating {count} tailored scenarios via Nemotron (structured output)")
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -72,53 +92,20 @@ async def generate_scenarios(business_context: str, count: int = 5) -> dict[str,
                 resp.raise_for_status()
                 data = await resp.json()
 
-        raw = data["choices"][0]["message"]["content"].strip()
+        items = json.loads(data["choices"][0]["message"]["content"])["scenarios"][:count]
 
-        # Strip markdown fences if present
-        if raw.startswith("```"):
-            raw = raw.split("```", 2)[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.rsplit("```", 1)[0].strip()
-
-        parsed: Any = json.loads(raw)
-        logger.debug(f"Parsed scenario JSON type: {type(parsed).__name__}, keys/len: {list(parsed.keys()) if isinstance(parsed, dict) else len(parsed)}")
-
-        # Normalise to a flat list of scenario dicts regardless of what the model returned
-        if isinstance(parsed, list):
-            items = parsed
-        elif isinstance(parsed, dict):
-            # Check if it looks like a single scenario (has id + system_prompt at top level)
-            if "system_prompt" in parsed and "id" in parsed:
-                items = [parsed]
-            else:
-                # Find the first value that is a list of dicts
-                items = None
-                for v in parsed.values():
-                    if isinstance(v, list) and v and isinstance(v[0], dict):
-                        items = v
-                        break
-                if items is None:
-                    # Dict of scenario dicts keyed by id or index: {"0": {...}, "admissions": {...}}
-                    items = [v for v in parsed.values() if isinstance(v, dict)]
-        else:
-            raise ValueError(f"Unexpected top-level JSON type: {type(parsed)}")
-
-        scenarios: dict[str, Scenario] = {}
-        for item in items:
-            if not isinstance(item, dict):
-                logger.warning(f"Skipping non-dict item in scenario list: {type(item)}")
-                continue
-            sid = item.get("id", f"scenario_{len(scenarios)}")
-            scenarios[sid] = Scenario(
-                id=sid,
-                name=item.get("name", sid),
-                description=item.get("description", ""),
-                system_prompt=item.get("system_prompt", ""),
+        scenarios: dict[str, Scenario] = {
+            item["id"]: Scenario(
+                id=item["id"],
+                name=item["name"],
+                description=item["description"],
+                system_prompt=item["system_prompt"],
             )
+            for item in items
+        }
 
         if not scenarios:
-            raise ValueError("LLM returned empty scenarios list")
+            raise ValueError("Model returned empty scenarios list")
 
         logger.info(f"Generated scenarios: {list(scenarios.keys())}")
         return scenarios

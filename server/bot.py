@@ -1,5 +1,6 @@
 """Gunk voice agent pipeline — simulates a customer calling a business."""
 
+import asyncio
 import os
 import sys
 from collections.abc import Callable
@@ -12,7 +13,8 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import AudioRawFrame, EndFrame, LLMRunFrame, LLMSetToolsFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -29,7 +31,6 @@ from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
 )
-from pipecat.workers.runner import WorkerRunner
 
 from nemotron_llm import NemotronLLMService
 from scenarios import SCENARIOS, Scenario
@@ -41,17 +42,20 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 class STTGate(FrameProcessor):
-    """Drops AudioRawFrames while the bot is speaking to prevent Twilio echo from reaching STT."""
+    """Drops audio input while the bot is speaking to block Twilio echo from reaching STT."""
 
     def __init__(self):
         super().__init__()
-        self._bot_speaking = False
+        self._muted = False
 
-    def set_speaking(self, speaking: bool) -> None:
-        self._bot_speaking = speaking
+    def mute(self) -> None:
+        self._muted = True
+
+    def unmute(self) -> None:
+        self._muted = False
 
     async def process_frame(self, frame: object, direction: FrameDirection) -> None:
-        if self._bot_speaking and isinstance(frame, AudioRawFrame):
+        if self._muted and isinstance(frame, AudioRawFrame):
             return
         await super().process_frame(frame, direction)
 
@@ -153,9 +157,7 @@ async def run_bot(
         custom_metadata={"scenario": scenario_id},
     )
 
-    # Use PipelineWorker + WorkerRunner — the documented pattern for telephony.
-    # PipelineTask + PipelineRunner doesn't route LLMRunFrame correctly.
-    worker = PipelineWorker(
+    task = PipelineTask(
         pipeline,
         params=PipelineParams(
             audio_in_sample_rate=8000,
@@ -166,33 +168,26 @@ async def run_bot(
         ),
     )
 
-    # Register Cekura handlers on transport (audio recording + finalization)
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected_tracer(transport, client):
-        await tracer._on_client_connected()
-
-    @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected_tracer(transport, client):
-        await tracer._finalize()
+    tracer.register_task_handlers(task, transport=transport)
 
     @transport.event_handler("on_client_connected")
     async def on_connected(transport, client):
-        # Bot speaks first as the customer
         context.add_message({"role": "user", "content": "(The call just connected. Start the conversation as the customer.)"})
-        await worker.queue_frames([LLMRunFrame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_started")
-    async def on_assistant_speaking(aggregator):
-        stt_gate.set_speaking(True)
+    async def on_bot_speaking(aggregator):
+        stt_gate.mute()
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn(aggregator, message):
         nonlocal _assistant_turns
         _assistant_turns += 1
         if _assistant_turns == _MIN_TURNS_BEFORE_HANGUP:
-            await worker.queue_frames([LLMSetToolsFrame(tools=_end_call_tools)])
-        await __import__("asyncio").sleep(1.5)
-        stt_gate.set_speaking(False)
+            await task.queue_frames([LLMSetToolsFrame(tools=_end_call_tools)])
+        # Unmute STT after a delay to cover TTS playback time and echo decay
+        await asyncio.sleep(2.0)
+        stt_gate.unmute()
 
     _finished = False
 
@@ -207,8 +202,11 @@ async def run_bot(
     @transport.event_handler("on_client_disconnected")
     async def on_disconnected(transport, client):
         _call_on_finished()
-        await worker.queue_frames([EndFrame()])
+        await task.queue_frames([EndFrame()])
 
-    runner = WorkerRunner()
-    await runner.run(worker)
-    _call_on_finished()
+    @task.event_handler("on_pipeline_finished")
+    async def on_pipeline_finished(task_instance, frame):
+        _call_on_finished()
+
+    runner = PipelineRunner(handle_sigint=False)
+    await runner.run(task)
