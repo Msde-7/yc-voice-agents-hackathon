@@ -178,12 +178,16 @@ async def run_bot(
 
     tracer.register_task_handlers(task, transport=transport)
 
-    @transport.event_handler("on_client_connected")
-    async def on_connected(transport, client):
-        # Bot is the customer — trigger the LLM to speak first when the call connects.
-        # No tools yet: prevents Nemotron from calling end_call on turn 1.
-        context.add_message({"role": "user", "content": "(The call just connected. Start the conversation as the customer.)"})
+    # Prime the context and schedule the opening LLM trigger.
+    # We avoid on_client_connected because FastAPIWebsocketTransport fires it
+    # during setup (before our handler is registered), causing it to be missed.
+    context.add_message({"role": "user", "content": "(The call just connected. Start the conversation as the customer.)"})
+
+    async def _trigger_opening():
+        await asyncio.sleep(0.5)
         await task.queue_frames([LLMRunFrame()])
+
+    asyncio.create_task(_trigger_opening())
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_started")
     async def on_assistant_speaking(aggregator):
