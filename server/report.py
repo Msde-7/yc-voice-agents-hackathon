@@ -62,14 +62,20 @@ Respond with JSON matching this schema exactly:
 """
 
 
+_MAX_TRANSCRIPT_CHARS = 1500  # per call — keeps total prompt manageable
+
+
 def _format_transcript(record: CallRecord) -> str:
-    lines = [f"--- Call {record.call_sid} | Scenario: {record.scenario_id} ---"]
+    lines = [f"--- Call | Scenario: {record.scenario_id} ---"]
     for msg in (record.transcript or []):
         role = msg.get("role", "unknown").upper()
         content = msg.get("content", "")
         if content and role != "SYSTEM":
             lines.append(f"{role}: {content}")
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    if len(text) > _MAX_TRANSCRIPT_CHARS:
+        text = text[:_MAX_TRANSCRIPT_CHARS] + "\n[truncated]"
+    return text
 
 
 async def generate_report(records: list[CallRecord]) -> CallReport:
@@ -101,7 +107,7 @@ async def generate_report(records: list[CallRecord]) -> CallReport:
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.2,
-        "max_tokens": 2048,
+        "max_tokens": 4096,
     }
 
     logger.info(f"Generating report for {len(usable)} call(s) via {llm_url}")

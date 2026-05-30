@@ -23,13 +23,15 @@ Generate exactly {count} customer call scenarios for testing this business's pho
 Each scenario should represent a realistic customer need specific to this type of business.
 Cover a mix of: simple information requests, service bookings, complaints/issues, and product/pricing questions.
 
-Output a JSON array with exactly {count} objects, each with this structure:
-{{
-  "id": "snake_case_identifier",
-  "name": "Short Display Name",
-  "description": "One sentence describing what this scenario tests.",
-  "system_prompt": "Full system prompt for the AI customer agent. Must: (1) set up a specific, realistic customer persona with a concrete goal, (2) include relevant details like order numbers, dates, or context where appropriate, (3) instruct the agent to keep responses short and conversational since this is a phone call, (4) end with: Once you have gathered enough information about how this business handles your request, say a brief thank you, then call the end_call function to hang up. Do NOT say 'end call' out loud — just call the function."
-}}"""
+You MUST output a JSON object with a single key "scenarios" whose value is an array of exactly {count} objects.
+Each object must have these exact keys:
+- "id": snake_case string identifier
+- "name": short display name
+- "description": one sentence describing what this scenario tests
+- "system_prompt": full system prompt for the AI customer agent — must (1) set up a specific realistic customer persona with a concrete goal, (2) include relevant details like student ID, dates, or context where appropriate, (3) instruct the agent to speak in very short turns — one sentence at a time, ask one question then wait, never list multiple questions at once, (4) end with: "Once you have what you need, say a brief thanks and call the end_call function to hang up. Do NOT say 'end call' out loud."
+
+Example output format (do not copy content, only structure):
+{{"scenarios": [{{"id": "example_id", "name": "Example", "description": "Tests X.", "system_prompt": "You are..."}}]}}"""
 
 
 async def generate_scenarios(business_context: str, count: int = 5) -> dict[str, Scenario]:
@@ -84,18 +86,21 @@ async def generate_scenarios(business_context: str, count: int = 5) -> dict[str,
 
         # Normalise to a flat list of scenario dicts regardless of what the model returned
         if isinstance(parsed, list):
-            # Bare array
             items = parsed
         elif isinstance(parsed, dict):
-            # Find the first value that is a list of dicts
-            items = None
-            for v in parsed.values():
-                if isinstance(v, list) and v and isinstance(v[0], dict):
-                    items = v
-                    break
-            if items is None:
-                # Dict of scenario dicts keyed by id or index: {"0": {...}, "admissions": {...}}
-                items = [v for v in parsed.values() if isinstance(v, dict)]
+            # Check if it looks like a single scenario (has id + system_prompt at top level)
+            if "system_prompt" in parsed and "id" in parsed:
+                items = [parsed]
+            else:
+                # Find the first value that is a list of dicts
+                items = None
+                for v in parsed.values():
+                    if isinstance(v, list) and v and isinstance(v[0], dict):
+                        items = v
+                        break
+                if items is None:
+                    # Dict of scenario dicts keyed by id or index: {"0": {...}, "admissions": {...}}
+                    items = [v for v in parsed.values() if isinstance(v, dict)]
         else:
             raise ValueError(f"Unexpected top-level JSON type: {type(parsed)}")
 
