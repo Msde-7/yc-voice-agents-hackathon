@@ -10,7 +10,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, LLMRunFrame, LLMSetToolsFrame
+from pipecat.frames.frames import AudioRawFrame, EndFrame, LLMRunFrame, LLMSetToolsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -19,6 +19,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import parse_telephony_websocket
 from pipecat.serializers.twilio import TwilioFrameSerializer
@@ -37,6 +38,22 @@ load_dotenv()
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+
+class STTGate(FrameProcessor):
+    """Drops AudioRawFrames while the bot is speaking to prevent Twilio echo from reaching STT."""
+
+    def __init__(self):
+        super().__init__()
+        self._bot_speaking = False
+
+    def set_speaking(self, speaking: bool) -> None:
+        self._bot_speaking = speaking
+
+    async def process_frame(self, frame: object, direction: FrameDirection) -> None:
+        if isinstance(frame, AudioRawFrame) and self._bot_speaking:
+            return  # swallow echo audio while bot is outputting
+        await self.push_frame(frame, direction)
 
 
 async def run_bot(
@@ -80,6 +97,7 @@ async def run_bot(
         api_key=os.environ["GRADIUM_API_KEY"],
         settings=GradiumSTTService.Settings(language="en"),
     )
+    stt_gate = STTGate()
     llm = NemotronLLMService()
 
     _end_call_tools = ToolsSchema(standard_tools=[
@@ -121,6 +139,7 @@ async def run_bot(
     pipeline = Pipeline(
         [
             transport.input(),
+            stt_gate,
             stt,
             context_aggregator.user(),
             llm,
@@ -157,6 +176,14 @@ async def run_bot(
     )
 
     tracer.register_task_handlers(task, transport=transport)
+
+    @transport.event_handler("on_bot_started_speaking")
+    async def on_bot_speaking_start(transport, *args):
+        stt_gate.set_speaking(True)
+
+    @transport.event_handler("on_bot_stopped_speaking")
+    async def on_bot_speaking_stop(transport, *args):
+        stt_gate.set_speaking(False)
 
     @transport.event_handler("on_client_connected")
     async def on_connected(transport, client):
