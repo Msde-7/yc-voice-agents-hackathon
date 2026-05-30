@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from twilio.rest import Client as TwilioClient
@@ -117,6 +117,7 @@ async def _run_analysis(
     requested_scenarios: list[str] | None,
     twiml_url: str,
     website: str | None,
+    count: int = 3,
 ):
     """Background task: scrape business, generate scenarios, run calls, produce report."""
     call_sids = []
@@ -136,7 +137,6 @@ async def _run_analysis(
         scenario_map = {sid: SCENARIOS[sid] for sid in requested_scenarios if sid in SCENARIOS}
     else:
         # Generate tailored scenarios from business context
-        count = 5
         scenario_map = await generate_scenarios(context, count=count)
 
     scenario_items = list(scenario_map.items())
@@ -196,12 +196,12 @@ async def _run_analysis(
 
 
 @app.post("/analyze")
-async def start_analysis(request: Request, background_tasks: BackgroundTasks):
+async def start_analysis(request: Request):
     """Scrape the business, generate tailored scenarios, run calls, return a combined report.
 
     Body JSON:
       { "to": "+15551234567" }
-        — scrape business by phone number, auto-generate 5 tailored scenarios
+        — scrape business by phone number, auto-generate 3 tailored scenarios
 
       { "to": "+15551234567", "website": "https://acmehotel.com" }
         — scrape the given website directly (skips the search step)
@@ -209,8 +209,12 @@ async def start_analysis(request: Request, background_tasks: BackgroundTasks):
       { "to": "+15551234567", "scenarios": ["hours_inquiry", "refund_request"] }
         — skip generation, use these specific static scenarios instead
 
+      { "to": "+15551234567", "count": 5 }
+        — generate this many scenarios (default: 3)
+
     Returns immediately with an analysis ID.
     Poll GET /analyze/{id} for status and the final report.
+    Cancel with POST /analyze/{id}/cancel.
     """
     body = await request.json()
     to_number = body.get("to")
@@ -218,25 +222,52 @@ async def start_analysis(request: Request, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=400, detail="Missing 'to' field")
 
     website = body.get("website")
+    count = int(body.get("count", 3))
 
-    # If caller passes explicit scenario names, validate and use static ones
     requested = body.get("scenarios")
     if requested:
         invalid = [s for s in requested if s not in SCENARIOS]
         if invalid:
             raise HTTPException(status_code=400, detail=f"Unknown scenarios: {invalid}. Valid: {list(SCENARIOS)}")
 
-    record = analysis_store.create(
-        to_number,
-        scenarios=requested or [],  # will be filled in after generation
-        website=website,
-    )
+    record = analysis_store.create(to_number, scenarios=requested or [], website=website)
     twiml_url = _make_twiml_url(request)
 
-    background_tasks.add_task(_run_analysis, record.id, to_number, requested, twiml_url, website)
+    task = asyncio.create_task(
+        _run_analysis(record.id, to_number, requested, twiml_url, website, count)
+    )
+    analysis_store.register_task(record.id, task)
 
-    logger.info(f"Started analysis {record.id} for {to_number}")
+    logger.info(f"Started analysis {record.id} for {to_number} (count={count})")
     return record.model_dump(mode="json")
+
+
+@app.post("/analyze/{analysis_id}/cancel")
+async def cancel_analysis(analysis_id: str):
+    """Cancel a running analysis and stop any pending calls."""
+    record = analysis_store.get(analysis_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Analysis {analysis_id} not found")
+    if record.status not in ("running",):
+        raise HTTPException(status_code=400, detail=f"Analysis is already {record.status}")
+
+    # Cancel asyncio task (stops future calls from being dialled)
+    analysis_store.cancel(analysis_id)
+
+    # Also cancel any calls that are currently active for this analysis
+    from_number = os.environ["TWILIO_PHONE_NUMBER"]
+    cancelled_calls = 0
+    for call_sid in record.call_sids:
+        try:
+            call = _twilio.calls(call_sid).fetch()
+            if call.status in ("in-progress", "ringing", "queued"):
+                _twilio.calls(call_sid).update(status="completed")
+                cancelled_calls += 1
+        except Exception as e:
+            logger.warning(f"Could not cancel call {call_sid}: {e}")
+
+    logger.info(f"Cancelled analysis {analysis_id} ({cancelled_calls} calls stopped)")
+    return {"cancelled": True, "calls_stopped": cancelled_calls}
 
 
 @app.get("/analyze/{analysis_id}")
