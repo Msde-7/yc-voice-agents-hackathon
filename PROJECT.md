@@ -14,12 +14,24 @@ Solution:
 
 Tech stack:
 
-- Gradium for voice (it’s similar to ElevenLabs)  
-- Pipecat for orchestration  
-- NVIDIA Nemotron for LLM inference, hosted on AWS  
-- Twilio for phone calling capabilities  
-- Cekura for analysis  
-- Business logic and other components will be implemented in Python
+- Gradium for voice (STT + TTS, similar to ElevenLabs)
+- Pipecat for orchestration
+- NVIDIA Nemotron for LLM inference, hosted on AWS (also used for scenario generation and report analysis)
+- Twilio for phone calling capabilities
+- Cekura for call observability and transcript storage
+- Firecrawl for business website scraping (discovers business context from phone number)
+- Business logic and other components implemented in Python
+
+How it works:
+
+1. User submits a business phone number to `POST /analyze`
+2. Firecrawl searches for the phone number, finds the business website, and scrapes it
+3. Nemotron generates N tailored customer call scenarios based on the scraped business context
+4. Gunk calls the business sequentially with each scenario via Twilio
+5. Each call runs the Pipecat pipeline: Gradium STT → Nemotron LLM → Gradium TTS
+6. Transcripts are saved locally and uploaded to Cekura for observability
+7. After all calls complete, Nemotron analyzes the transcripts and produces a structured report
+8. The report identifies which support flows can be automated vs. which need human agents
 
 Documentation:
 
@@ -42,3 +54,7 @@ Documentation:
   - Pipecat integration: https://docs.pipecat.ai/pipecat/fundamentals/evaluations/cekura  
   - Python SDK: https://docs.cekura.ai/cli-sdk/sdk  
   - We have credits available
+- Firecrawl
+  - Docs: https://docs.firecrawl.dev/
+  - Python SDK: https://docs.firecrawl.dev/sdks/python
+  - Used for: searching a business by phone number and scraping their website

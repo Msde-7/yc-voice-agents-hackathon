@@ -31,7 +31,7 @@ from pipecat.transports.websocket.fastapi import (
 )
 
 from nemotron_llm import NemotronLLMService
-from scenarios import SCENARIOS
+from scenarios import SCENARIOS, Scenario
 
 load_dotenv()
 
@@ -42,6 +42,7 @@ logger.add(sys.stderr, level="DEBUG")
 async def run_bot(
     runner_args: RunnerArguments,
     scenario_id: str = "general_support",
+    scenario_data: Scenario | None = None,
     on_finished: Callable[[list], None] | None = None,
     _call_data: dict | None = None,
 ):
@@ -94,7 +95,7 @@ async def run_bot(
         ),
     )
 
-    scenario = SCENARIOS[scenario_id]
+    scenario = scenario_data if scenario_data is not None else SCENARIOS.get(scenario_id, SCENARIOS["general_support"])
     tools = ToolsSchema(standard_tools=[
         FunctionSchema(
             name="end_call",

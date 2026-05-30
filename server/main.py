@@ -14,9 +14,11 @@ from twilio.twiml.voice_response import Connect, Stream, VoiceResponse
 import analysis_store
 import call_store
 from bot import run_bot
+from business_context import get_business_context
 from pipecat.runner.types import WebSocketRunnerArguments
 from report import generate_report
-from scenarios import SCENARIOS
+from scenario_generator import generate_scenarios
+from scenarios import SCENARIOS, Scenario
 
 load_dotenv()
 
@@ -24,8 +26,10 @@ app = FastAPI(title="Gunk")
 
 _twilio = TwilioClient(os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"])
 
-# Maps call_sid → scenario_id so the /ws handler knows which scenario to run
+# Maps call_sid → scenario_id
 _pending_scenarios: dict[str, str] = {}
+# Maps call_sid → full Scenario dict (for dynamically generated scenarios)
+_pending_scenario_data: dict[str, Scenario] = {}
 # Signals waiting analysis workers that a call has completed
 _call_complete_events: dict[str, asyncio.Event] = {}
 
@@ -49,11 +53,13 @@ def _make_twiml_url(request: Request) -> str:
     return f"{scheme}://{host}/twiml"
 
 
-def _dial(to_number: str, scenario_id: str, twiml_url: str) -> str:
+def _dial(to_number: str, scenario_id: str, twiml_url: str, scenario_data: Scenario | None = None) -> str:
     """Initiate an outbound Twilio call. Returns call_sid."""
     from_number = os.environ["TWILIO_PHONE_NUMBER"]
     call = _twilio.calls.create(to=to_number, from_=from_number, url=twiml_url, method="POST")
     _pending_scenarios[call.sid] = scenario_id
+    if scenario_data:
+        _pending_scenario_data[call.sid] = scenario_data
     call_store.create(call.sid, to_number, scenario_id)
     logger.info(f"Initiated call {call.sid} to {to_number} (scenario={scenario_id})")
     return call.sid
@@ -82,6 +88,7 @@ async def websocket_endpoint(websocket: WebSocket):
     call_sid = call_data.get("call_id", "")
 
     scenario_id = _pending_scenarios.pop(call_sid, "general_support")
+    scenario_data = _pending_scenario_data.pop(call_sid, None)
     call_store.update_status(call_sid, "in_progress")
 
     def on_finished(messages: list) -> None:
@@ -91,7 +98,6 @@ async def websocket_endpoint(websocket: WebSocket):
             ended_at=datetime.now(timezone.utc),
             transcript=messages,
         )
-        # Signal any waiting analysis worker that this call is done
         event = _call_complete_events.pop(call_sid, None)
         if event:
             event.set()
@@ -99,18 +105,47 @@ async def websocket_endpoint(websocket: WebSocket):
     await run_bot(
         WebSocketRunnerArguments(websocket=websocket),
         scenario_id=scenario_id,
+        scenario_data=scenario_data,
         on_finished=on_finished,
         _call_data=call_data,
     )
 
 
-async def _run_analysis(analysis_id: str, to_number: str, scenarios: list[str], twiml_url: str):
-    """Background task: run each scenario sequentially then generate the report."""
+async def _run_analysis(
+    analysis_id: str,
+    to_number: str,
+    requested_scenarios: list[str] | None,
+    twiml_url: str,
+    website: str | None,
+):
+    """Background task: scrape business, generate scenarios, run calls, produce report."""
     call_sids = []
 
-    for scenario_id in scenarios:
+    # Step 1: discover business context via Firecrawl
+    logger.info(f"Analysis {analysis_id}: fetching business context for {to_number}")
+    try:
+        context = await get_business_context(to_number, website=website)
+        analysis_store.update(analysis_id, business_context=context or None)
+    except Exception as e:
+        logger.error(f"Business context lookup failed: {e}")
+        context = ""
+
+    # Step 2: generate tailored scenarios (or use requested static ones)
+    if requested_scenarios:
+        # User specified scenarios by name — use static definitions
+        scenario_map = {sid: SCENARIOS[sid] for sid in requested_scenarios if sid in SCENARIOS}
+    else:
+        # Generate tailored scenarios from business context
+        count = 5
+        scenario_map = await generate_scenarios(context, count=count)
+
+    scenario_items = list(scenario_map.items())
+    analysis_store.update(analysis_id, scenarios=[sid for sid, _ in scenario_items])
+    logger.info(f"Analysis {analysis_id}: running {len(scenario_items)} scenarios")
+
+    for scenario_id, scenario_data in scenario_items:
         try:
-            call_sid = _dial(to_number, scenario_id, twiml_url)
+            call_sid = _dial(to_number, scenario_id, twiml_url, scenario_data=scenario_data)
             call_sids.append(call_sid)
 
             # Wait for this call to complete before dialling the next one
@@ -162,28 +197,45 @@ async def _run_analysis(analysis_id: str, to_number: str, scenarios: list[str], 
 
 @app.post("/analyze")
 async def start_analysis(request: Request, background_tasks: BackgroundTasks):
-    """Run multiple call scenarios against a business and return a combined report.
+    """Scrape the business, generate tailored scenarios, run calls, return a combined report.
 
-    Body JSON: { "to": "+15551234567", "scenarios": ["hours_inquiry", "refund_request"] }
-    Omit "scenarios" to run all 5. Returns immediately with an analysis ID;
-    poll GET /analyze/{id} for status and the final report.
+    Body JSON:
+      { "to": "+15551234567" }
+        — scrape business by phone number, auto-generate 5 tailored scenarios
+
+      { "to": "+15551234567", "website": "https://acmehotel.com" }
+        — scrape the given website directly (skips the search step)
+
+      { "to": "+15551234567", "scenarios": ["hours_inquiry", "refund_request"] }
+        — skip generation, use these specific static scenarios instead
+
+    Returns immediately with an analysis ID.
+    Poll GET /analyze/{id} for status and the final report.
     """
     body = await request.json()
     to_number = body.get("to")
     if not to_number:
         raise HTTPException(status_code=400, detail="Missing 'to' field")
 
-    scenario_ids = body.get("scenarios", list(SCENARIOS.keys()))
-    invalid = [s for s in scenario_ids if s not in SCENARIOS]
-    if invalid:
-        raise HTTPException(status_code=400, detail=f"Unknown scenarios: {invalid}. Valid: {list(SCENARIOS)}")
+    website = body.get("website")
 
-    record = analysis_store.create(to_number, scenario_ids)
+    # If caller passes explicit scenario names, validate and use static ones
+    requested = body.get("scenarios")
+    if requested:
+        invalid = [s for s in requested if s not in SCENARIOS]
+        if invalid:
+            raise HTTPException(status_code=400, detail=f"Unknown scenarios: {invalid}. Valid: {list(SCENARIOS)}")
+
+    record = analysis_store.create(
+        to_number,
+        scenarios=requested or [],  # will be filled in after generation
+        website=website,
+    )
     twiml_url = _make_twiml_url(request)
 
-    background_tasks.add_task(_run_analysis, record.id, to_number, scenario_ids, twiml_url)
+    background_tasks.add_task(_run_analysis, record.id, to_number, requested, twiml_url, website)
 
-    logger.info(f"Started analysis {record.id} for {to_number} — {len(scenario_ids)} scenarios")
+    logger.info(f"Started analysis {record.id} for {to_number}")
     return record.model_dump(mode="json")
 
 

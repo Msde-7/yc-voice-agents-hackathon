@@ -12,6 +12,8 @@ from report_models import CallReport
 class AnalysisRecord(BaseModel):
     id: str
     to_number: str
+    website: str | None = None
+    business_context: str | None = None
     scenarios: list[str]
     status: Literal["running", "completed", "failed"]
     call_sids: list[str] = []
@@ -24,10 +26,11 @@ class AnalysisRecord(BaseModel):
 _store: dict[str, AnalysisRecord] = {}
 
 
-def create(to_number: str, scenarios: list[str]) -> AnalysisRecord:
+def create(to_number: str, scenarios: list[str], website: str | None = None) -> AnalysisRecord:
     record = AnalysisRecord(
         id=str(uuid.uuid4()),
         to_number=to_number,
+        website=website,
         scenarios=scenarios,
         status="running",
         started_at=datetime.now(timezone.utc),

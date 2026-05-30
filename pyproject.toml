@@ -9,6 +9,7 @@ dependencies = [
     "aiohttp>=3.9.0",
     "cekura>=0.1.0",
     "fastapi>=0.115.0",
+    "firecrawl-py>=4.28.2",
     "pipecat-ai[gradium,nvidia,runner,silero,webrtc,websocket]>=1.3.0",
     "python-dotenv>=1.0.0",
     "python-multipart>=0.0.29",
