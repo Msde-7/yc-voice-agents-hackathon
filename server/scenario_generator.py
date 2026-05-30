@@ -46,8 +46,8 @@ For each scenario:
 - name: short display name
 - description: one sentence describing what this scenario tests
 - system_prompt: 2-3 sentences. Set up a specific customer persona with a concrete goal \
-relevant to this business. Open with a single question. Speak in short turns — one sentence \
-at a time, never list multiple questions at once."""
+relevant to this business. Always stay in the customer role — never switch to playing the \
+business or agent. Open with a single question; speak in short turns, one sentence at a time."""
 
 
 async def generate_scenarios(business_context: str, count: int = 3) -> dict[str, Scenario]:

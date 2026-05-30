@@ -186,8 +186,9 @@ async def run_bot(
         _assistant_turns += 1
         if _assistant_turns == _MIN_TURNS_BEFORE_HANGUP:
             await task.queue_frames([LLMSetToolsFrame(tools=_end_call_tools)])
-        # Unmute STT after a delay to cover TTS playback time and echo decay
-        await asyncio.sleep(2.0)
+        # Wait long enough for TTS to finish playing AND for Twilio echo to decay.
+        # on_assistant_turn_stopped fires when LLM text is done, not when audio finishes.
+        await asyncio.sleep(6.0)
         stt_gate.unmute()
 
     _finished = False
