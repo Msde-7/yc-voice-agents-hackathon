@@ -18,6 +18,7 @@ class AnalysisRecord(BaseModel):
     to_number: str
     website: str | None = None
     business_context: str | None = None
+    screenshot_url: str | None = None
     scenarios: list[str]
     status: Literal["running", "completed", "failed", "cancelled"]
     call_sids: list[str] = []

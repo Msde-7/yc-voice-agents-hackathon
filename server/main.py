@@ -132,8 +132,12 @@ async def _run_analysis(
     # Step 1: discover business context via Firecrawl
     logger.info(f"Analysis {analysis_id}: fetching business context for {to_number}")
     try:
-        context = await get_business_context(to_number, website=website)
-        analysis_store.update(analysis_id, business_context=context or None)
+        context, screenshot_url = await get_business_context(to_number, website=website)
+        analysis_store.update(
+            analysis_id,
+            business_context=context or None,
+            screenshot_url=screenshot_url,
+        )
     except Exception as e:
         logger.error(f"Business context lookup failed: {e}")
         context = ""
