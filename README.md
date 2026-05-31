@@ -1,88 +1,55 @@
 # Gunk
 
-Gunk calls a business's phone number, acts as different types of customers, and produces a report showing which parts of their support flow could be handled by an AI voice agent — and which need a human.
+**AI-powered voice agent analysis for customer support operations.**
 
-## Architecture
+Gunk calls a business's phone number, simulates realistic customer interactions across multiple scenarios, and produces a structured report identifying which parts of their support flow can be automated by an AI voice agent — and which require a human.
 
-```
-POST /call (scenario) → Twilio REST API (outbound call)
-                ↓
-  Twilio dials target → POST /twiml (webhook)
-                ↓
-  TwiML: <Stream url="wss://host/ws" />
-                ↓
-  WebSocket /ws → Pipecat Pipeline:
-    Twilio In → NVIDIA ASR → Nemotron LLM → Gradium TTS → Twilio Out
-                ↓
-  Call ends → Cekura (transcript + audio) + local call store
-                ↓
-  POST /report → Nemotron analysis → automation report
-```
+Built from scratch on May 30, 2026.
 
-## Quick Demo
+---
+
+## How it works
+
+1. Submit a business website URL and phone number
+2. Gunk scrapes the website (Firecrawl) to understand the business context
+3. An LLM generates tailored call scenarios specific to that business type
+4. Gunk calls the number sequentially with each scenario, acting as a realistic customer
+5. All calls are analyzed and a structured automation report is produced
+
+---
+
+## Tech stack
+
+- **Pipecat** — voice agent orchestration; manages the real-time pipeline of STT → LLM → TTS over a Twilio WebSocket stream
+- **NVIDIA Nemotron** (hosted on AWS via vLLM) — LLM for both the customer agent and post-call report analysis; accessed via OpenAI-compatible structured output API
+- **Gradium** — speech-to-text and text-to-speech
+- **Twilio** — outbound phone calling and audio streaming
+- **Cekura** — call observability; session transcripts and audio are automatically uploaded after each call. During development, our coding agents used Cekura's MCP server to pull logs and analyze what went wrong in real time
+- **Firecrawl** — business website scraping to generate context-aware call scenarios
+- **FastAPI** — backend server
+
+---
+
+## Feedback on tools
+
+**NVIDIA Nemotron** — inference latency was a little slow for a real-time voice use case (~2–3s TTFB for the first response), though subsequent turns were faster. Works well for offline analysis tasks like report generation.
+
+**Twilio** — worked great for outbound calling and audio streaming. The main challenge was verification: it was hard for our coding agents to have a tight feedback loop since every test required a real phone call, making iteration slower than a local browser-based test.
+
+---
+
+## Running locally
+
+See [SETUP.md](SETUP.md) for full setup instructions.
 
 ```bash
-# 1. Install dependencies
+# Install dependencies
 uv sync
 
-# 2. Fill in credentials
-cp .env.example .env
-# Edit .env with Twilio, NVIDIA, Gradium, and Cekura keys
-
-# 3. Expose local server to Twilio
-ngrok http 8000
-
-# 4. Start the server
+# Start the server
 cd server
-uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+PYTHONUTF8=1 uv run uvicorn main:app --host 0.0.0.0 --port 8000
 
-# 5. Trigger calls across different scenarios
-curl -X POST http://localhost:8000/call \
-  -H "Content-Type: application/json" \
-  -d '{"to": "+15551234567", "scenario": "hours_inquiry"}'
-
-curl -X POST http://localhost:8000/call \
-  -H "Content-Type: application/json" \
-  -d '{"to": "+15551234567", "scenario": "refund_request"}'
-
-# 6. Check call status
-curl http://localhost:8000/calls
-
-# 7. Generate an automation report (use call SIDs from step 6)
-curl -X POST http://localhost:8000/report \
-  -H "Content-Type: application/json" \
-  -d '{"call_sids": ["CA...", "CA..."]}'
+# Open the UI
+open http://localhost:8000
 ```
-
-## Scenarios
-
-| ID | Name | Description |
-|----|------|-------------|
-| `general_support` | General Support | Open-ended inquiry to explore the support experience |
-| `hours_inquiry` | Hours Inquiry | Asks about hours, weekends, and holiday closures |
-| `refund_request` | Refund Request | Mildly frustrated customer requesting a refund |
-| `appointment_booking` | Appointment Booking | Customer scheduling a service appointment |
-| `product_question` | Product Question | Pre-purchase questions about features and pricing |
-
-## API
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/call` | Initiate an outbound call — body: `{"to": "+1...", "scenario": "..."}` |
-| `GET` | `/calls` | List all calls with status and metadata |
-| `GET` | `/calls/{call_sid}` | Get a single call record |
-| `POST` | `/report` | Generate report — body: `{"call_sids": ["CA..."]}` |
-
-## Setup
-
-See [SETUP.md](SETUP.md) for full setup instructions including Twilio CLI, Cekura, and ngrok configuration.
-
-## Tech Stack
-
-- **Pipecat** — voice agent orchestration
-- **NVIDIA Nemotron** — LLM (hosted on AWS via vLLM)
-- **Gradium** — text-to-speech
-- **NVIDIA ASR** — speech-to-text
-- **Twilio** — phone calling
-- **Cekura** — call analysis and observability
-- **FastAPI** — web server
