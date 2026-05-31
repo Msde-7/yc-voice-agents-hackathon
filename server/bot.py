@@ -11,7 +11,14 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import AudioRawFrame, EndFrame, LLMRunFrame, LLMSetToolsFrame
+from pipecat.frames.frames import (
+    AudioRawFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    EndFrame,
+    LLMRunFrame,
+    LLMSetToolsFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -62,10 +69,11 @@ class STTGate(FrameProcessor):
 
 
 class TTSActivityTracker(FrameProcessor):
-    """Mutes the STTGate when TTS audio is flowing out, unmutes after playback ends.
+    """Mutes STTGate on BotStartedSpeakingFrame, unmutes after BotStoppedSpeakingFrame.
 
-    Placed after GradiumTTSService in the pipeline so it sees actual output audio
-    frames — more reliable than transport events which may not be registered.
+    These frames are emitted by the output transport after actual audio playback
+    starts/stops — more accurate than tracking TTS generation frames which are
+    produced before the buffered audio has actually played out.
     """
 
     def __init__(self, gate: STTGate, post_speech_delay: float = 2.0):
@@ -76,9 +84,11 @@ class TTSActivityTracker(FrameProcessor):
 
     async def process_frame(self, frame: object, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
-        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, AudioRawFrame):
+        if isinstance(frame, BotStartedSpeakingFrame):
             self._gate.mute()
-            # Reset the unmute countdown every time an audio frame arrives
+            if self._unmute_task and not self._unmute_task.done():
+                self._unmute_task.cancel()
+        elif isinstance(frame, BotStoppedSpeakingFrame):
             if self._unmute_task and not self._unmute_task.done():
                 self._unmute_task.cancel()
             self._unmute_task = asyncio.create_task(self._delayed_unmute())
