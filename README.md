@@ -40,7 +40,8 @@ Built from scratch on May 30, 2026.
 
 ## Running locally
 
-See [SETUP.md](SETUP.md) for full setup instructions.
+See [SETUP.md](SETUP.md) for full setup instructions. You'll need a `.env` file
+with the required API keys (Twilio, Firecrawl, Nemotron, Cekura) before running.
 
 ```bash
 # Install dependencies
