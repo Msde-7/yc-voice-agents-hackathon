@@ -38,6 +38,16 @@ Built from scratch on May 30, 2026.
 
 ---
 
+## Screenshots
+
+![Analysis steps](screenshots/gunk_steps.png)
+
+![Report — automation score and flow steps](screenshots/gunk_report_1.png)
+
+![Report — recommended actions](screenshots/gunk_report_2.png)
+
+---
+
 ## Running locally
 
 See [SETUP.md](SETUP.md) for full setup instructions.
