@@ -6,6 +6,9 @@ Gunk calls a business's phone number, simulates realistic customer interactions 
 
 Built from scratch on May 30, 2026.
 
+> [!NOTE]
+> We forgot to add the video link before the submission deadline, but the demo was recorded by 6:15 PM. Watch it here: https://www.youtube.com/watch?v=8CZllbkwBwk
+
 ---
 
 ## How it works
