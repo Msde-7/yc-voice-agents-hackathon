@@ -61,6 +61,34 @@ class STTGate(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+class TTSActivityTracker(FrameProcessor):
+    """Mutes the STTGate when TTS audio is flowing out, unmutes after playback ends.
+
+    Placed after GradiumTTSService in the pipeline so it sees actual output audio
+    frames — more reliable than transport events which may not be registered.
+    """
+
+    def __init__(self, gate: STTGate, post_speech_delay: float = 2.0):
+        super().__init__()
+        self._gate = gate
+        self._post_speech_delay = post_speech_delay
+        self._unmute_task: asyncio.Task | None = None
+
+    async def process_frame(self, frame: object, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, AudioRawFrame):
+            self._gate.mute()
+            # Reset the unmute countdown every time an audio frame arrives
+            if self._unmute_task and not self._unmute_task.done():
+                self._unmute_task.cancel()
+            self._unmute_task = asyncio.create_task(self._delayed_unmute())
+        await self.push_frame(frame, direction)
+
+    async def _delayed_unmute(self) -> None:
+        await asyncio.sleep(self._post_speech_delay)
+        self._gate.unmute()
+
+
 async def run_bot(
     runner_args: RunnerArguments,
     scenario_id: str = "general_support",
@@ -96,6 +124,7 @@ async def run_bot(
         settings=GradiumSTTService.Settings(language="en"),
     )
     stt_gate = STTGate()
+    tts_tracker = TTSActivityTracker(gate=stt_gate, post_speech_delay=2.0)
     llm = NemotronLLMService()
 
     _end_call_tools = ToolsSchema(standard_tools=[
@@ -140,6 +169,7 @@ async def run_bot(
             context_aggregator.user(),
             llm,
             tts,
+            tts_tracker,   # mutes STTGate when audio is actually flowing out
             transport.output(),
             context_aggregator.assistant(),
         ]
@@ -175,18 +205,6 @@ async def run_bot(
     async def on_connected(transport, client):
         context.add_message({"role": "user", "content": "(The call just connected. Start the conversation as the customer.)"})
         await task.queue_frames([LLMRunFrame()])
-
-    # Gate STT on the OUTPUT transport's speaking events — these fire when audio
-    # actually starts/stops playing, not just when the LLM finishes generating.
-    @transport.output().event_handler("on_bot_started_speaking")
-    async def on_bot_started_speaking(output_transport):
-        stt_gate.mute()
-
-    @transport.output().event_handler("on_bot_stopped_speaking")
-    async def on_bot_stopped_speaking(output_transport):
-        # Brief delay for Twilio echo to decay before re-opening the gate.
-        await asyncio.sleep(2.0)
-        stt_gate.unmute()
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn(aggregator, message):
