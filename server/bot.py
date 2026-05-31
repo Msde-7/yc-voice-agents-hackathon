@@ -176,9 +176,17 @@ async def run_bot(
         context.add_message({"role": "user", "content": "(The call just connected. Start the conversation as the customer.)"})
         await task.queue_frames([LLMRunFrame()])
 
-    @context_aggregator.assistant().event_handler("on_assistant_turn_started")
-    async def on_bot_speaking(aggregator):
+    # Gate STT on the OUTPUT transport's speaking events — these fire when audio
+    # actually starts/stops playing, not just when the LLM finishes generating.
+    @transport.output().event_handler("on_bot_started_speaking")
+    async def on_bot_started_speaking(output_transport):
         stt_gate.mute()
+
+    @transport.output().event_handler("on_bot_stopped_speaking")
+    async def on_bot_stopped_speaking(output_transport):
+        # Brief delay for Twilio echo to decay before re-opening the gate.
+        await asyncio.sleep(2.0)
+        stt_gate.unmute()
 
     @context_aggregator.assistant().event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn(aggregator, message):
@@ -186,10 +194,6 @@ async def run_bot(
         _assistant_turns += 1
         if _assistant_turns == _MIN_TURNS_BEFORE_HANGUP:
             await task.queue_frames([LLMSetToolsFrame(tools=_end_call_tools)])
-        # Wait long enough for TTS to finish playing AND for Twilio echo to decay.
-        # on_assistant_turn_stopped fires when LLM text is done, not when audio finishes.
-        await asyncio.sleep(6.0)
-        stt_gate.unmute()
 
     _finished = False
 
