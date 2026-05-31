@@ -50,7 +50,8 @@ Built from scratch on May 30, 2026.
 
 ## Running locally
 
-See [SETUP.md](SETUP.md) for full setup instructions.
+See [SETUP.md](SETUP.md) for full setup instructions. You'll need a `.env` file
+with the required API keys (Twilio, Firecrawl, Nemotron, Cekura) before running.
 
 ```bash
 # Install dependencies
@@ -60,6 +61,6 @@ uv sync
 cd server
 PYTHONUTF8=1 uv run uvicorn main:app --host 0.0.0.0 --port 8000
 
-# Open the UI
-open http://localhost:8000
+# Open the UI in your browser
+# http://localhost:8000
 ```
