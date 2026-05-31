@@ -50,6 +50,6 @@ uv sync
 cd server
 PYTHONUTF8=1 uv run uvicorn main:app --host 0.0.0.0 --port 8000
 
-# Open the UI
-open http://localhost:8000
+# Open the UI in your browser
+# http://localhost:8000
 ```
